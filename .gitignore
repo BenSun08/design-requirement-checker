@@ -1,0 +1,224 @@
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Compiled extensions
+*.so
+*.pyd
+*.dll
+
+
+# ============================================================
+# Virtual environments
+# ============================================================
+
+.venv/
+venv/
+env/
+ENV/
+
+.python-version
+
+
+# ============================================================
+# Python tooling caches
+# ============================================================
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Pyright
+.pyright/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Hypothesis
+.hypothesis/
+
+# tox / nox
+.tox/
+.nox/
+
+
+# ============================================================
+# Build / Packaging
+# ============================================================
+
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# PyInstaller generated temporary files
+# NOTE:
+# Keep *.spec files under version control because the spec file
+# should be part of the reproducible packaging configuration.
+__pyinstaller__/
+
+# Installer output
+installer-output/
+release/
+
+
+# ============================================================
+# Application runtime data
+# ============================================================
+
+# Local SQLite runtime databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Application runtime data directory
+runtime/
+runtime-data/
+
+# Temporary application files
+tmp/
+temp/
+
+# Logs
+logs/
+*.log
+
+
+# ============================================================
+# Local configuration / secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+config.local.*
+settings.local.*
+
+*.secret
+*.secrets
+
+
+# ============================================================
+# PySide6 / Qt generated files
+# ============================================================
+
+# Generated Python files from Qt Designer .ui files
+ui_*.py
+
+# Generated Python files from Qt resource files
+*_rc.py
+
+# Qt / QML caches
+.qmlcache/
+qmlcache/
+
+# NOTE:
+# Do NOT ignore *.ui or *.qrc.
+# They are source files and should be committed.
+
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.example.json
+
+# JetBrains / PyCharm
+.idea/
+*.iml
+
+# Cursor
+.cursor/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+
+# ============================================================
+# Jupyter
+# ============================================================
+
+.ipynb_checkpoints/
+
+
+# ============================================================
+# Operating systems
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk
+
+
+# ============================================================
+# Test temporary/output files
+# ============================================================
+
+test-output/
+test-results/
+screenshots/
+
+
+# ============================================================
+# Local sample / imported documents
+# ============================================================
+
+# Real engineering documents should normally NOT be committed.
+# Keep README / placeholder files if needed.
+samples/private/
+samples/local/
+
+# User-imported DOCX files
+imports/
+
+# Temporary exported documents
+exports/
+
+
+# ============================================================
+# Backup files
+# ============================================================
+
+*.bak
+*.backup
+*.tmp
+*.temp
+*.orig

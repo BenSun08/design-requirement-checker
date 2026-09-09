@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-09T16:41:24Z",
+  "title": "Design System: Design Requirement Checker",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "dialog",
+        "value": "0 12px 40px #18283b33",
+        "purpose": "Raised modal dialog."
+      },
+      {
+        "name": "selected-row-marker",
+        "value": "inset 3px 0 #245ba5",
+        "purpose": "Marks the selected result, independently of its status."
+      }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1100px" },
+      { "name": "stacked-workspace", "value": "760px" }
+    ],
+    "focus": {
+      "outline": "3px solid #447ec8",
+      "outlineOffset": "2px"
+    },
+    "dialogBackdrop": "#16233766",
+    "source": ["prototype/styles.css", "prototype/index.html"],
+    "validation": "Source extraction only; no independent visual validation."
+  }
+}
