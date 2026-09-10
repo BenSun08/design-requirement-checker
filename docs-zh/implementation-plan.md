@@ -1,5 +1,12 @@
 # Design Requirement Checker — 实施计划
 
+**2026-09-11 框架初始化记录**
+
+用户已单独批准基本目录与桌面框架初始化；当前仓库已包含 Python 包、启动入口、
+最小 Qt Widgets 窗口及启动检查。详见 [验证记录](../docs/skeleton-verification.md)。
+本次未完成下文 Task 1 技术验证或 Task 2 真实 DOCX 纵向切片；下文关于源码尚未
+创建的描述属于初始化之前的规划状态。
+
 [English source](../docs/implementation-plan.md)
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。

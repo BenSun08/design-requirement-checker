@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "design-requirement-checker"
+version = "0.1.0"
+description = "Local engineering DOCX checker — desktop skeleton"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = "Apache-2.0"
+dependencies = ["PySide6==6.11.2"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.16.6", "mypy==2.3.1"]
+
+[project.gui-scripts]
+design-requirement-checker = "design_requirement_checker.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src"]

@@ -1,5 +1,11 @@
 # Design Requirement Checker — Implementation Plan
 
+**2026-09-11 execution note:** The owner separately approved and the repository now
+contains the basic desktop skeleton. See [verification](skeleton-verification.md).
+The task descriptions below remain the broader plan; the skeleton does not
+complete Task 1 or Task 2. Their references to absent source describe the state
+before this initialization slice.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
