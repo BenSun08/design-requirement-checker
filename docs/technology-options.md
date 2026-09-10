@@ -1,10 +1,12 @@
-# Production technology options
+# Production technology decision and historical options
 
-**PROVISIONAL — no stack selected.** Researched 2026-09-10 against primary documentation. No candidate engine or Windows package was built. Ratings below are engineering judgements for this project, not benchmark results. Prototype HTML/CSS/JavaScript is disposable and gives no candidate an entitlement to selection.
+[简体中文版](../docs-zh/technology-options.md)
 
-## Decision context and matrix
+**DECIDED BY OWNER: Python + PySide6 / Qt Widgets (Option A).** Windows 10/11 x64, ordinary users without administrator/installation privileges. The comparison below retains the research baseline from 2026-09-10; it is historical rationale, not an open shortlist or fresh validation. No candidate engine or Windows package has been built. The decision is explicit owner selection, not a claim that spikes passed. The browser prototype remains disposable.
 
-Windows desktop, local/offline DOCX, Chinese engineering text, dense review workspace, explainable deterministic checks, approximately eight hours/week of development. Developer/team familiarity and managed-device policy are unknown and could reverse the ranking. AI receives low weight. Every candidate can separate presentation/application/domain/adapters without services.
+## Historical decision context and matrix
+
+Windows desktop, local/offline DOCX, Chinese engineering text, dense review workspace, explainable deterministic checks, approximately eight hours/week of development. At the time of comparison, developer/team familiarity and managed-device policy were unknown. The owner has since selected A and confirmed the no-admin Windows targets; remaining policy details inform deployment validation, not an automatic reranking. AI receives low weight. Every candidate can separate presentation/application/domain/adapters without services.
 
 Weight is ordinal: **Critical** can veto a candidate, **High** materially affects sustainable delivery, **Medium** breaks ties, **Low** is optional future value. No numerical total: differences are not precisely measurable yet. “Strong” means a credible fit, not validated correctness.
 
@@ -28,7 +30,7 @@ All support local file dialogs, file access, drag/drop and Unicode; Chinese IME,
 
 **Advantages:** a single authored programming language, convenient text/fixture work, mature desktop controls. Python domain can be tested without launching the UI. Qt for Python provides official bindings; the documented deployment tool can produce a Windows executable. [Qt for Python](https://doc.qt.io/qtforpython-6/index.html), [pyside6-deploy](https://doc.qt.io/qtforpython-6/deployment/deployment-pyside6-deploy.html).
 
-**DOCX strategy:** python-docx for convenient paragraphs/tables/runs, with focused OOXML inspection where its model does not expose enough. `Font.strike` is tri-state; `None` must not become false. Prototype-level plain-text extraction is inadequate. Validate inherited formatting and run span mapping. [python-docx text API](https://python-docx.readthedocs.io/en/latest/api/text.html).
+**DOCX strategy to validate (library not yet selected):** python-docx for convenient paragraphs/tables/runs, with focused OOXML inspection where its model does not expose enough. `Font.strike` is tri-state; `None` must not become false. Prototype-level plain-text extraction is inadequate. Validate inherited formatting and run span mapping. [python-docx text API](https://python-docx.readthedocs.io/en/latest/api/text.html).
 
 **Disadvantages/risks:** Qt model/view and signals have a learning curve; dependency freezing, plugin inclusion and runtime faults require desktop testing. High-level library support does not prove full Word fidelity. Packaging/license review for chosen Qt components belongs in the spike, not assumptions about zero deployment effort.
 
@@ -86,10 +88,38 @@ All support local file dialogs, file access, drag/drop and Unicode; Chinese IME,
 - Antivirus false positives and Windows trust prompts are different phenomena. Signing is useful but is not a guarantee that every policy accepts an executable; test the actual organizational environment. [Microsoft code-signing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control).
 - Codex can assist all candidates; no evidence justifies a productivity multiplier or claim that generated code removes OOXML/packaging validation. One toolchain and inspectable fixtures make assistance easier to review.
 
-## Current recommendation — PROVISIONAL
+## Confirmed decision and consequences
 
-**Tentative preference: A, Python + PySide6 using Qt Widgets.** It matches the document/text-heavy scope and dense desktop UI with one application language and no custom desktop/core process contract. This is a maintainability inference, conditional on developer familiarity and successful Windows deployment/style-fidelity spikes.
+**Selected:** Python application/domain/adapters, PySide6 Qt Widgets presentation, one local desktop process. No Electron, React production frontend, Tauri/Rust, C#/.NET, Python sidecar, QML or embedded web engine in the selected architecture. Background execution may be needed for responsiveness; it does not imply a separate core service.
 
-**Strongest alternative: E, C#/.NET + WPF.** Its Windows and typed OOXML fit is particularly compelling. Prefer E over A if .NET is the team's handover standard, Qt distribution constraints are unacceptable, or the same-fixture spike shows materially less effort with the Open XML SDK.
+The owner's decision follows the document/text-oriented workflow, compact desktop UX and reduced maintained language/process count. Option E remains the historically strongest alternative; it is not a parallel implementation track. A serious validation failure must be reported with evidence and bounded remedies; changing the selected stack requires a new owner decision.
 
-B remains credible if web/TS skill dominates; C needs demonstrated Python-only requirements plus a strong web UI reason; D needs a concrete footprint or team-expertise benefit. Do not run five full implementations. First ask about skills/IT constraints, then validate A and E on the same tiny fixture and packaging probes. The owner chooses the final stack only after reviewing that evidence.
+### Mandatory deployment constraints
+
+- Both Windows 10 and Windows 11, x64. Exact supported builds must be checked against the eventual Python/Qt version combination; this document does not claim all historical Windows builds are supported.
+- Users have no administrator/installation privileges. A solution requiring the user to elevate, install Python/Qt or write machine-wide configuration fails the product constraint.
+- Validate a self-contained portable directory distribution first. A per-user installer may be considered only if IT permits its use without elevation. Portable executables can still be blocked by enterprise execution policy; involve IT rather than bypassing it.
+- Separate user-writable baseline/settings/logs from application files; test replacement/update without losing baseline data. Avoid required Program Files/HKLM writes or services.
+- Initial distribution, extraction/installation, first launch and document checking must be completely offline. The complete package must carry all required runtime dependencies; no online bootstrapper, pip install, activation or prerequisite download may be necessary on the target computer.
+
+### Within-stack validation still required
+
+S1/S2: Python DOCX library, OOXML access, effective style handling, scope coverage and source mapping. S3: exact Python/PySide6 versions, freezer/packager, runtime bundling and permitted deployment model on both OS families. S6: transformation allowlist, requirement-span association, ambiguity handling and document scale. Local storage format and user-data location need a small persistence validation. These are unresolved engineering details, not undecided production frameworks.
+
+See [technical-spikes.md](technical-spikes.md) for the proposed validation work and [implementation-plan.md](implementation-plan.md) for the updated staged plan. No spike execution or production implementation is authorized by this documentation update.
+
+## Confirmed Python 3.8 and fully offline environment
+
+The owner reports that company computers currently have **Python 3.8** installed; upgrading it may not be possible. This is an existing-environment fact, not a selected application/build runtime version. Keep that installation and its PATH/file associations unchanged. Targets remain **Windows 10 and Windows 11 x64**, with **no administrator/installation privileges**. **Initial distribution, extraction/installation, first launch and normal checking must be completely offline.**
+
+The planned self-contained package must carry its validated Python/Qt/native dependencies and must not invoke the computer's `python` or require target-side `pip install`, online activation or downloads. S3 must verify execution both alongside unchanged Python 3.8 and on a clean machine without Python, with networking disabled and no cached prerequisites. No packaged build has passed these checks yet.
+
+Development/build environment availability is a separate open item: establish whether an approved isolated/newer interpreter and Windows build machine are available without changing the company installation. Do not assume a Python 3.8 `venv` upgrades the interpreter. If the only permitted build/runtime is 3.8, first evaluate the exact compatible dependency set and maintenance implications; do not silently pin old packages or change the selected stack. Full offline delivery does not establish whether the build machine itself has network access; record that separately and prepare offline build dependencies if needed.
+
+### Current runtime compatibility evidence
+
+The current Qt for Python getting-started page specifies Python 3.10+, so its latest-package installation path must not be assumed compatible with Python 3.8. This does not establish the complete compatibility range of every historical PySide6 release. [Qt for Python requirements](https://doc.qt.io/qtforpython-6/gettingstarted.html).
+
+Python 3.8 reached upstream end of life on 2024-10-07. A legacy-runtime path therefore needs an explicit maintenance assessment; the company installation is not changed by this document. [Python version status](https://devguide.python.org/versions/).
+
+PyInstaller documents bundling the active interpreter and dependencies so that users need no installed Python. This supports investigating an application-private runtime, not claiming this project's package already works. PyInstaller remains an evaluated packaging option, not a selected dependency; its output is OS/interpreter/architecture-specific and a Windows package must be validated accordingly. [PyInstaller operating model](https://pyinstaller.org/en/stable/operating-mode.html).
