@@ -18,13 +18,19 @@
 **规格：**[product-spec.md](product-spec.md)、[domain-model.md](domain-model.md)、[ux-spec.md](ux-spec.md)。
 **投入：**约八小时／周，单开发者流程。
 
+**平台边界：**macOS 和 Windows 是开发及 CI 平台；生产运行环境仍为
+Windows 10/11 x64，Windows 产物只在 Windows 构建。首次使用 PyInstaller
+onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
+
 本修订取代旧八周计划中的选栈任务，记录已确认规则及任务／验收边界，不把未经验证的库 API、版本、Windows 分发方式当作定案。本次不创建生产源文件。执行前审查实验依据并授权一个有限切片，再据已验证依赖展开精确接口和命令。
 
 ## 当前状态与全局约束
 
-- 已有代码仅为浏览器模拟；prototype-verification.md 是历史记录，不是 Python 解析器或 Windows 证据。
+- 当前生产代码是桌面框架，并保留历史浏览器模拟；macOS／Windows 开发共用一套 Python 源码。两者都不构成 Python 解析器或 Windows 部署证据。
 - Windows 10/11 x64，无管理员／安装权限，不要求用户安装 Python/Qt/Office。具体 Windows 构建及运行时兼容属于 S3。
 - 首次分发、解压／安装、首次启动和核查完全离线，原件不变。目标电脑不依赖在线引导安装器、pip install、激活或依赖下载。
+- GitHub Actions 在 macOS 和 Windows 使用 Python 3.13 验证；Windows-only 手动工作流生成 PyInstaller onedir 候选包。CI 构建是 S3 输入，不代表 S3 完成。
+- 后续基准／配置／日志的持久化路径由平台适配器通过 Qt `QStandardPaths` 取得；领域层和应用层保持 OS 无关，不在可执行文件目录写运行数据。
 - 一套本地基准；id/code/name/detectionPhrase 必填，expectedDescription 可选，aliases/category/notes/enabled 明确。不自动提词、不建订单模板框架。
 - 三个 CheckStatus 加独立 UNRESOLVED，后者 status 为空。正常／删除线并存、部分／未知格式、身份歧义、有效关键值冲突待人工核查。
 - 保留所有合格出现；单处明确功能参数变化可为 CONFIGURED + DIFFERENT；没有预期／不支持比较为 NOT_COMPARED。
@@ -37,7 +43,7 @@
 |---|---|
 | A 产品规则 | 用户已确认 1–7，不重复询问相同规则；用夹具验证转换和要求范围细节 |
 | B 技术栈 | 已关闭：选择 Python + PySide6 Qt Widgets；不比较决赛候选、不自动转用其他框架 |
-| C 技术就绪 | S1/S2/S3/S6 待验证；依赖切片前记录库／运行时／存储／打包工具及差距 |
+| C 技术就绪 | 已有跨平台 CI 和初始 PyInstaller onedir 配置；S1/S2/S3/S6 仍待验证，CI 产物不证明干净电脑离线部署 |
 | D 执行授权 | 本次不执行实验或生产代码；下个有限工作包需要授权 |
 | E 试点 | 标注夹具／历史验证和无管理员 Windows 部署通过，用户同意发布阈值 |
 
@@ -57,7 +63,7 @@
 | `src/design_requirement_checker/__main__.py` | 只负责启动／组装 |
 | `tests/fixtures/`, `tests/test_domain.py`, `tests/test_matching.py`, `tests/test_docx_adapter.py` | 独立期望输出和确定性测试 |
 | `tests/test_application.py`, `tests/test_baseline_store.py`, `tests/test_ui.py` | 失效／取消、保存／恢复及重点 Qt 交互 |
-| `pyproject.toml` 与选定的锁定／构建配置 | 已验证版本、测试／质量命令、包元数据 |
+| `pyproject.toml`、`.github/workflows/`、`packaging/windows/` | 共享开发／CI 依赖、测试／质量命令、Windows-only PyInstaller onedir 打包 |
 
 不建通用 repository、协议框架或内部插件系统。公共契约遵循领域规格，库专用对象不能逃出适配器。持久化保存基准数据，不保存模拟源码夹具。提出目录结构不代表授权搭建。
 
@@ -143,7 +149,7 @@
 
 ## 任务 7 — 无管理员 Windows 分发与试点
 
-**产物：**已验证便携包或允许的用户级包、发布说明、数据位置／替换说明、试点清单。准确构建文件依据 S3 选择。
+**产物：**已验证 PyInstaller onedir 便携包、发布说明、数据位置／替换说明、试点清单。Windows-only CI 提供候选包，是否可部署由 S3 验证。
 
 - [ ] 在干净 Windows 10/11 x64 无管理员／安装权限、无开发运行时环境重复部署。
 - [ ] 验证启动、选择／拖放、离线核查、基准持久化、中文／长路径、DPI、错误日志位置。
@@ -160,7 +166,7 @@
 
 ## 验证与完成定义
 
-建立包配置时选择并锁定 test/lint/type-check 工具，目前生产项目没有可执行检查。配置后运行单元、夹具、小范围应用／Qt 测试，再运行全套约定检查与 `git diff --check`。浏览器模拟测试不能替代真实 DOCX 或干净 Windows 测试。
+包配置已锁定 test/lint/type-check 工具，CI 在 macOS 和 Windows 执行。运行重点单元、夹具、小范围应用／Qt 测试后，再运行全套配置检查与 `git diff --check`。通过 CI 矩阵、浏览器模拟或生成 PyInstaller 产物都不能替代真实 DOCX 或干净 Windows 测试。
 
 切片完成需要验收证据、明确失败／范围限制、文档行为一致、相关回归通过。试点还需历史指标／阈值和两类 OS 无管理员部署依据。AI、增强 fuzzy/diff、导出、人工验收、Word 集成与团队功能仍单独决策。
 

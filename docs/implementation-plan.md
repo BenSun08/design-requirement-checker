@@ -15,13 +15,20 @@ before this initialization slice.
 **Spec:** [product-spec.md](product-spec.md), [domain-model.md](domain-model.md), [ux-spec.md](ux-spec.md).
 **Capacity:** approximately eight hours/week, single-developer workflow.
 
+**Platform boundaries:** macOS and Windows are development and CI platforms. The
+production runtime remains Windows 10/11 x64, and Windows artifacts are built on
+Windows only. The initial package is a PyInstaller onedir portable bundle; no
+macOS-to-Windows cross-compilation is supported.
+
 This revision supersedes the earlier eight-week plan's stack-selection tasks. It records confirmed rules and task/acceptance boundaries without pretending that untested library APIs, versions or Windows deployment choices are finalized. Production source is not created by this update. Before execution, review the relevant probe evidence and authorize a bounded slice; expand its exact interfaces and commands using the validated dependencies.
 
 ## Current state and global constraints
 
-- Existing code is a browser mock only. Verification in prototype-verification.md is historical; it is not Python parser or Windows evidence.
+- Existing production code is a desktop skeleton alongside the historical browser mock. The repository has one shared Python source tree for macOS and Windows development; neither is Python parser or Windows deployment evidence.
 - Production target is Windows 10 and Windows 11 x64, with no administrator/installation privileges. No user-installed Python/Qt/Office prerequisite. Exact Windows builds and compatible runtime versions are S3 inputs.
 - Initial distribution, extraction/installation, first launch and checking must be completely offline; original documents must remain unchanged. No target-side online bootstrapper, pip install, activation or dependency download.
+- GitHub Actions validates Python 3.13 on macOS and Windows. The manual Windows-only build workflow creates a PyInstaller onedir artifact; CI packaging is an input to S3, not completion of S3.
+- Future persistent baseline/configuration/log paths are platform adapters selected through Qt `QStandardPaths`; the domain and application layers remain OS-independent and the executable directory is not a writable-data location.
 - One locally maintained baseline. Required id/code/name/detectionPhrase, optional expectedDescription, explicit aliases/category/notes/enabled. No automatic phrase extractor or order-template framework.
 - Three CheckStatus values plus separate UNRESOLVED resolution/status unset. Active/deleted coexistence, partial/unknown strike, ambiguous identity and conflicting active key values are unresolved.
 - Keep all qualifying occurrences. A single established function with a changed expected value can be CONFIGURED + DIFFERENT; no expected description/unsupported comparison is NOT_COMPARED.
@@ -34,7 +41,7 @@ This revision supersedes the earlier eight-week plan's stack-selection tasks. It
 |---|---|
 | A Product rules | Owner confirmed items 1–7; do not ask again for the same policy. Validate transformation and requirement-span details against fixtures. |
 | B Production stack | Closed: Python + PySide6 Qt Widgets selected. No finalist comparison or automatic fallback to another framework. |
-| C Technical readiness | S1/S2/S3/S6 evidence pending. Record exact library/runtime/storage/packager choices and known gaps before dependent slices. |
+| C Technical readiness | Cross-platform CI and the initial PyInstaller onedir configuration exist. S1/S2/S3/S6 evidence remains pending; a CI artifact does not prove clean-machine offline deployment. |
 | D Execution authorization | This documentation update starts no probes or production code. Obtain authorization for the next bounded work package. |
 | E Pilot | Labelled fixture/historical validation and no-admin Windows deployment must pass; owner agrees release thresholds. |
 
@@ -54,7 +61,7 @@ Paths below are planned, not existing files. Keep the small module structure; sp
 | `src/design_requirement_checker/__main__.py` | Application startup/composition only |
 | `tests/fixtures/`, `tests/test_domain.py`, `tests/test_matching.py`, `tests/test_docx_adapter.py` | Independent expected outcomes and deterministic tests |
 | `tests/test_application.py`, `tests/test_baseline_store.py`, `tests/test_ui.py` | Invalidation/cancellation, save/recovery and focused Qt interactions |
-| `pyproject.toml` and selected lock/build configuration | Exact validated versions, test/quality commands and package metadata |
+| `pyproject.toml`, `.github/workflows/` and `packaging/windows/` | Shared development/CI dependencies, test/quality commands and Windows-only PyInstaller onedir packaging |
 
 Do not create a generic repository layer, protocol framework or internal plugin system. Public contracts follow the domain spec; library-specific objects do not escape the document adapter. Persistence stores baseline data, not mock source fixtures. A source hierarchy proposal does not authorize scaffolding it.
 
@@ -140,7 +147,7 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 ## Task 7 — No-admin Windows distribution and pilot
 
-**Artifacts:** validated portable or permitted per-user package, release notes, data-location/replacement instructions, pilot checklist. Exact build files follow the S3 packager decision.
+**Artifacts:** validated PyInstaller onedir portable package, release notes, data-location/replacement instructions, pilot checklist. The Windows-only CI build supplies a candidate bundle; S3 establishes whether it is deployable.
 
 - [ ] Repeat deployment on clean Windows 10 and 11 x64 without administrator/installation privileges or developer runtimes.
 - [ ] Verify launch, file selection/drop, offline checking, baseline persistence, Chinese/long paths, DPI and error-log location.
@@ -157,7 +164,7 @@ The former eight-week outline is an initial planning reference, not a reliable c
 
 ## Verification and definition of done
 
-Choose and pin test/lint/type-check tooling when package configuration is created; no executable project checks currently exist for production. Once configured, use focused unit tests, fixture tests, small application/Qt tests, then full agreed checks and `git diff --check`. Do not substitute a browser mock test for a real DOCX fixture or clean Windows run.
+The package pins test/lint/type-check tooling and CI runs it on macOS and Windows. Use focused unit tests, fixture tests, small application/Qt tests, then the full configured checks and `git diff --check`. Do not substitute a passing CI matrix, browser mock test, or PyInstaller artifact for a real DOCX fixture or clean Windows run.
 
 A slice is complete only when its acceptance evidence exists, failures and scope limitations are explicit, documentation matches behavior and the relevant regression checks pass. Pilot additionally requires historical metrics/thresholds and both OS/no-admin deployment evidence. AI, enhanced fuzzy/diff, export, manual approval, Word integration and team features remain separate future decisions.
 

@@ -140,7 +140,8 @@ qmlcache/
 # ============================================================
 
 # VS Code
-.vscode/
+.vscode/*
+!.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/settings.example.json
 

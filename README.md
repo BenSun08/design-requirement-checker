@@ -3,31 +3,76 @@
 **Python + PySide6 / Qt Widgets desktop skeleton.** Production stack is selected;
 DOCX ingestion, matching, persistence and Windows distribution remain pending.
 
-## Desktop development
+## Development platforms
 
-The current development baseline is **Python 3.13** in an isolated environment.
-This is not the final Windows deployment runtime decision. Do not replace the
-company Python 3.8 installation or change its PATH/file associations.
+The same Python + PySide6 source tree supports development, execution, testing,
+and debugging on **macOS and Windows**. The selected development interpreter is
+Python 3.13. This does not change the company's existing Python 3.8 installation:
+do not upgrade it or change its PATH/file associations.
 
-macOS / Linux development shell:
+### macOS
+
+Create an isolated environment and install the editable project with development
+tools:
 
 ```sh
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
+```
+
+Run the desktop application:
+
+```sh
 .venv/bin/python -m design_requirement_checker
 ```
 
-Windows PowerShell, only on a development machine with an approved Python 3.13:
+Run all checks:
+
+```sh
+.venv/bin/python -m pytest -q
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m mypy src
+.venv/bin/python -m pip check
+git diff --check
+```
+
+### Windows
+
+On a development machine with an approved Python 3.13, use PowerShell to create
+an isolated environment and install the editable project with development tools:
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+Run the desktop application:
+
+```powershell
 .\.venv\Scripts\python.exe -m design_requirement_checker
 ```
 
-These commands install developer dependencies and may need network access. They
-are not end-user distribution instructions. End-user delivery must bundle its
-validated runtime for fully offline operation without administrator privileges.
+Run all checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m ruff format --check .
+.\.venv\Scripts\python.exe -m mypy src
+.\.venv\Scripts\python.exe -m pip check
+git diff --check
+```
+
+Dependency installation may need network access on development machines. These
+commands are not end-user distribution instructions.
+
+### Debugging
+
+Open the repository in VS Code or Cursor, select the interpreter from the local
+`.venv`, and launch **Design Requirement Checker**. The shared
+`.vscode/launch.json` starts the `design_requirement_checker` module and contains
+no developer-specific or operating-system-specific interpreter path.
 
 The window contains a title, an initialization notice and a split workspace.
 Future import/check/manage buttons are disabled. It reads no DOCX, generates no
@@ -43,23 +88,40 @@ results and stores no baseline. `prototype/` remains a separate historical mock.
 - `tests/fixtures/`: conventions for future synthetic fixtures and independent labels.
 - `pyproject.toml`: package metadata and pinned direct development dependencies.
 
-## Development checks
+## CI validation
 
-After installing the development extras:
+GitHub Actions runs the same test, lint, format, type, and dependency checks on
+`macos-latest` and `windows-latest` using Python 3.13. The startup test sets
+`QT_QPA_PLATFORM=offscreen` for its child process only; normal application runs
+retain the platform's native Qt display behavior.
 
-```sh
-.venv/bin/python -m pytest -q
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/mypy src
-.venv/bin/python -m pip check
-git diff --check
-```
+## Production target and Windows packaging
 
-On Windows use the executables in `.venv\Scripts` instead of `.venv/bin`.
-The startup test sets `QT_QPA_PLATFORM=offscreen` for its child process only.
-These checks do not establish DOCX accuracy or Windows deployment readiness.
-See [skeleton verification](docs/skeleton-verification.md) for observed evidence.
+The production runtime target is **Windows 10/11 x64 only**. macOS is a supported
+development and CI platform; it is not a Windows cross-compilation host. Windows
+executables are built on a Windows runner through the manually triggered
+`build-windows.yml` workflow.
+
+The initial packaging strategy is PyInstaller **onedir**. The workflow uploads
+the complete `dist/DesignRequirementChecker/` directory as an artifact, including
+`DesignRequirementChecker.exe` and the application-private Python, Qt, and native
+runtime files. PyInstaller 6.22.3 is pinned because the current release supports
+Python 3.13, PySide6, and a Windows x64 wheel; Python and PySide6 remain at their
+existing repository versions. The intended end-user package requires no
+separately installed Python, Qt, pip, administrator privileges, or network access.
+
+Creating an artifact in GitHub Actions does not prove Windows 10/11 deployment
+readiness. The bundle still requires clean-machine, standard-user, fully offline
+testing on both supported Windows families, including tests alongside the
+unchanged company Python 3.8 installation and on a machine without Python.
+
+Future persistent baseline, configuration, and log data must use a user-writable
+platform location supplied by Qt's `QStandardPaths` (for example Application
+Support on macOS and AppData on Windows). Runtime data must not be stored beside
+the executable. Persistence itself is not implemented in this infrastructure PR.
+
+See [skeleton verification](docs/skeleton-verification.md) for the earlier local
+framework evidence.
 
 ## Open the prototype
 
@@ -93,4 +155,7 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 
 ## Review gate
 
-The owner selected Python + PySide6 / Qt Widgets and approved the basic skeleton. Technical-spike evidence is still pending for document ingestion, matching, storage and no-admin offline Windows packaging. See the implementation plan for subsequent slices; this skeleton does not complete those slices.
+The owner selected Python + PySide6 / Qt Widgets and approved the shared
+development, CI, and Windows packaging foundation. Technical-spike evidence is
+still pending for document ingestion, matching, storage, and real Windows
+no-admin/offline deployment. See the implementation plan for subsequent slices.

@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Design Requirement Checker",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "design_requirement_checker",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
