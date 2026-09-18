@@ -10,8 +10,18 @@ before this initialization slice.
 fixtures) — see [technical-spikes.md](technical-spikes.md). Task 2 first DOCX
 vertical slice executed on the same day: domain value models, the validated
 python-docx 1.2.0 + focused OOXML adapter, import coordination and a minimal
-Qt document view, test-first. Matching, baseline persistence, background
-execution and Windows validation remain future tasks.
+Qt document view, test-first. A same-day remediation slice fixed
+ingestion/coverage defects found in review: hyperlink-wrapped runs are
+extracted (previously silent loss), first-page/even-page header and footer
+variants and table-only header/footer content are detected, known unsupported
+structures (field codes, footnote/endnote references, `w:altChunk`, smart
+tags, nested hyperlinks) force LIMITED instead of silent COMPLETE, the
+default paragraph style is resolved from the `w:default="1"` marker rather
+than an assumed "Normal" id, read failures carry distinct categories
+(file-access-error / invalid-or-unreadable-document / unexpected-parser-error),
+and the preview preserves whitespace (`white-space: pre-wrap`). Matching,
+baseline persistence, background execution and Windows validation remain
+future tasks.
 
 [简体中文版](../docs-zh/implementation-plan.md)
 
@@ -92,12 +102,12 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Consumes:** local file selection and immutable input bytes. **Produces:** Document with paragraph blocks, original runs/effective strike, stable snapshot locations and coverage warnings, or an explicit failure.
 
-- [x] Write fixture assertions for paragraph text, table/cell origin, split runs, style inheritance and unsupported/protected/malformed inputs. Done 2026-09-18 in tests/test_domain.py, tests/test_docx_adapter.py, tests/test_application.py and tests/test_ui.py with hand-written labels, reusing the spike fixture factory.
+- [x] Write fixture assertions for paragraph text, table/cell origin, split runs, style inheritance, unsupported structures and malformed inputs. Done 2026-09-18 in tests/test_domain.py, tests/test_docx_adapter.py, tests/test_application.py and tests/test_ui.py with hand-written labels, reusing the spike fixture factory. Remediation (same day) added fixtures for hyperlink-wrapped runs, header/footer variants (including table-only content), a custom default paragraph style, unsupported structures (field codes, footnote/endnote references, `w:altChunk`, smart tags) and the OLE compound-file container of password-protected documents. Encrypted/password-protected DOCX handling remains unvalidated beyond that container-format failure path — see remaining validation.
 - [x] Demonstrate tests fail for the absent/incorrect behavior before implementing the adapter. All four new test modules failed on collection (ImportError) before implementation; observed in the Task 2 run log.
 - [x] Implement the minimum extraction and domain validation under the confirmed scope; no cross-paragraph/cell matching. domain.py (validated value models), docx_adapter.py (python-docx 1.2.0 + focused OOXML/XML access ported from the validated spike probe), application.py (import_document -> Document or ImportFailure).
 - [x] Show selected filename, blocks and formatting in a minimal Qt Widgets window; parsing stays outside widgets. ui/main_window.py renders filename, coverage warnings and blocks with strike markers; it only calls the application use case (import deferred until first use so startup stays adapter-free).
 - [x] Check original bytes unchanged, source locations reproducible and LIMITED/failed states distinct from empty successful content. Asserted by test_docx_adapter (sha256 before/after, repeated-read stability) and test_ui (LIMITED warnings, explicit failure, empty document distinct).
-- [x] Run focused tests and the configured project checks; review the bounded diff and update documented limitations. 87 tests passed; ruff check, ruff format --check, mypy (strict), pip check and git diff --check all pass. Known limitations: parsing runs on the UI thread during import (background execution is Task 4); Windows and real-document validation pending.
+- [x] Run focused tests and the configured project checks; review the bounded diff and update documented limitations. 87 tests passed; ruff check, ruff format --check, mypy (strict), pip check and git diff --check all pass. Known limitations: parsing runs on the UI thread during import (background execution is Task 4); Windows and real-document validation pending. Remediation re-ran all gates: 100 tests passed with the same checks green; the Windows PyInstaller workflow was not triggered in the remediation slice and stays pending manual run.
 
 **Acceptance:** real input→real block→visible source works. No matching yet. Unrecognized formatting is not silently active text; unsupported content does not disappear without a scope warning.
 

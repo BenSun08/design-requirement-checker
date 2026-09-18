@@ -9,6 +9,7 @@ import os
 
 import fixture_factory as fixtures
 import pytest
+from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from design_requirement_checker.application import ImportFailure, import_document
@@ -90,6 +91,17 @@ class TestPureFormatting:
         assert "〔dbl〕" in html
         assert "〔orphan〕" in html
 
+    def test_preview_preserves_meaningful_whitespace(self, tmp_path) -> None:
+        # Raw block text such as "A  B\tC" must survive the HTML preview:
+        # the paragraph style keeps Qt's rich-text engine from collapsing
+        # runs of spaces.
+        document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
+        html = format_blocks_html(document)
+        assert 'style="white-space: pre-wrap"' in html
+        rendered = QTextDocument()
+        rendered.setHtml(html)
+        assert "A  B\tC" in rendered.toPlainText()
+
     def test_empty_document_renders_explicit_empty_state(self, tmp_path) -> None:
         document = import_document(fixtures.build_empty(tmp_path / "empty.docx"))
         html = format_blocks_html(document)
@@ -121,13 +133,13 @@ class TestWindowDisplay:
         window = MainWindow()
         failure = ImportFailure(
             filename="broken.docx",
-            reason="unreadable-file",
-            detail="PackageNotFoundError: bad zip file",
+            reason="invalid-or-unreadable-document",
+            detail="BadZipFile: File is not a zip file",
         )
         window.show_import_outcome(failure)
         assert "导入失败" in window._summary_label.text()
         assert "broken.docx" in window._summary_label.text()
-        assert "PackageNotFoundError" in window._blocks_view.toPlainText()
+        assert "BadZipFile" in window._blocks_view.toPlainText()
         assert window._warnings_label.isHidden() is True
         window.close()
 

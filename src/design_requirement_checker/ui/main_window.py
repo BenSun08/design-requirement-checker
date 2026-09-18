@@ -57,14 +57,19 @@ def _format_run_html(run: TextRun) -> str:
 
 
 def format_blocks_html(document: Document) -> str:
-    """Render document blocks as Qt rich text with strike formatting."""
+    """Render document blocks as Qt rich text with strike formatting.
+
+    Run paragraphs use ``white-space: pre-wrap`` so multiple spaces and tabs
+    from the raw block text stay visible (Qt's rich-text engine collapses
+    them in plain ``<p>`` elements). The underlying domain text is unchanged.
+    """
     if not document.blocks:
         return "<p>文档为空：未发现正文段落或表格内容。</p>"
     parts = [f"<p>{_LEGEND}</p>"]
     for block in document.blocks:
         runs_html = "".join(_format_run_html(run) for run in block.runs) or "（空段落）"
         parts.append(f"<p><b>{html.escape(format_location(block.location))}</b></p>")
-        parts.append(f"<p>{runs_html}</p>")
+        parts.append(f'<p style="white-space: pre-wrap">{runs_html}</p>')
     return "".join(parts)
 
 

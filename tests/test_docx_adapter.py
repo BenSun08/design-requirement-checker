@@ -62,6 +62,30 @@ def excluded(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest.fixture(scope="module")
+def hyperlink(tmp_path_factory: pytest.TempPathFactory):
+    return fixtures.build_hyperlink(tmp_path_factory.mktemp("a-hyperlink") / "hyperlink.docx")
+
+
+@pytest.fixture(scope="module")
+def header_variants(tmp_path_factory: pytest.TempPathFactory):
+    return fixtures.build_header_variants(tmp_path_factory.mktemp("a-headers") / "headers.docx")
+
+
+@pytest.fixture(scope="module")
+def custom_default_style(tmp_path_factory: pytest.TempPathFactory):
+    return fixtures.build_custom_default_style(
+        tmp_path_factory.mktemp("a-default-style") / "default-style.docx"
+    )
+
+
+@pytest.fixture(scope="module")
+def unsupported(tmp_path_factory: pytest.TempPathFactory):
+    return fixtures.build_unsupported_structures(
+        tmp_path_factory.mktemp("a-unsupported") / "unsupported.docx"
+    )
+
+
+@pytest.fixture(scope="module")
 def empty(tmp_path_factory: pytest.TempPathFactory):
     return fixtures.build_empty(tmp_path_factory.mktemp("a-empty") / "empty.docx")
 
@@ -230,6 +254,112 @@ class TestTablesAndLocations:
         assert len(document.blocks) == 9
 
 
+class TestHyperlinkExtraction:
+    def test_hyperlink_text_appears_in_order_with_contiguous_offsets(self, hyperlink) -> None:
+        document = read_document(hyperlink)
+        block = document.blocks[0]
+        assert block.text == "Prefix hyperlink text suffix"
+        assert [(r.text, r.start_offset, r.end_offset) for r in block.runs] == [
+            ("Prefix ", 0, 7),
+            ("hyperlink text", 7, 21),
+            (" suffix", 21, 28),
+        ]
+        assert block.text == "".join(r.text for r in block.runs)
+
+    def test_hyperlink_strike_state_resolved_not_unknown(self, hyperlink) -> None:
+        document = read_document(hyperlink)
+        link_run = document.blocks[0].runs[1]
+        assert (link_run.effective_strike, link_run.strike_origin, link_run.strike_reason) == (
+            True,
+            "direct",
+            "",
+        )
+
+    def test_multi_run_hyperlink_and_table_cell_hyperlink(self, hyperlink) -> None:
+        document = read_document(hyperlink)
+        multi = document.blocks[1]
+        assert multi.text == "linkAlinkB"
+        assert [(r.text, r.effective_strike) for r in multi.runs] == [
+            ("linkA", False),
+            ("linkB", True),
+        ]
+        cell = document.blocks[2]
+        assert cell.block_id == "t0r0c0:table-cell:p0"
+        assert cell.text == "cell link"
+
+    def test_nested_hyperlink_content_excluded_explicitly(self, hyperlink) -> None:
+        document = read_document(hyperlink)
+        nested_block = document.blocks[3]
+        assert nested_block.text == "outer"
+        assert "nested" not in nested_block.text
+        assert document.coverage is Coverage.LIMITED
+        assert "nested-hyperlink-content-excluded" in document.warnings
+
+
+class TestHeaderFooterVariants:
+    def test_variant_content_detected_as_limited(self, header_variants) -> None:
+        # The default footer stays linked (no part) and the even-page footer
+        # carries only table content: table-only footer content must still
+        # produce the footer warning.
+        document = read_document(header_variants)
+        assert document.coverage is Coverage.LIMITED
+        assert set(document.warnings) == {
+            "header-content-not-checked",
+            "footer-content-not-checked",
+        }
+
+    def test_variant_content_not_parsed_into_body_blocks(self, header_variants) -> None:
+        document = read_document(header_variants)
+        assert [block.text for block in document.blocks] == ["visible body"]
+        all_text = "\n".join(block.text for block in document.blocks)
+        for absent in ("DEFAULT HEADER", "FIRST PAGE HEADER", "EVEN FOOTER TABLE CELL"):
+            assert absent not in all_text
+
+
+class TestCustomDefaultStyle:
+    def test_default_style_marker_resolves_style_chain(self, custom_default_style) -> None:
+        # CorpBody (w:default='1', strike on) — not 'Normal' — is the root of
+        # the paragraph-style chain for paragraphs without an explicit pStyle.
+        document = read_document(custom_default_style)
+        inherited = document.blocks[0].runs[0]
+        assert (inherited.effective_strike, inherited.strike_origin) == (True, "paragraph-style")
+        override = document.blocks[1].runs[0]
+        assert (override.effective_strike, override.strike_origin) == (False, "direct")
+        assert document.coverage is Coverage.COMPLETE
+
+
+class TestUnsupportedStructures:
+    def test_known_unsupported_structures_report_limited(self, unsupported) -> None:
+        document = read_document(unsupported)
+        assert document.coverage is Coverage.LIMITED
+        for token in (
+            "field-code-content-excluded",
+            "footnote-or-endnote-content-excluded",
+            "alt-chunk-content-excluded",
+            "smart-tag-content-excluded",
+        ):
+            assert token in document.warnings
+
+    def test_unsupported_content_not_silently_extracted_or_lost(self, unsupported) -> None:
+        document = read_document(unsupported)
+        assert [block.text for block in document.blocks] == [
+            "intro",
+            "field result text",
+            "",
+            "body with footnote",
+            "body with endnote",
+            " tail",
+            "clean paragraph",
+        ]
+        all_text = "\n".join(block.text for block in document.blocks)
+        # Complex-field result runs are direct paragraph children and stay
+        # extracted; fldSimple and smart-tag wrapped content is excluded with
+        # explicit warnings instead of disappearing silently or passing as
+        # COMPLETE.
+        assert "fldSimple cached result" not in all_text
+        assert "smart tag text" not in all_text
+
+
 class TestCoverageHonesty:
     def test_tracked_revisions_limited_and_revision_text_excluded(self, tracked) -> None:
         document = read_document(tracked)
@@ -262,11 +392,35 @@ class TestCoverageHonesty:
         assert document.coverage is Coverage.COMPLETE
         assert document.warnings == ()
 
-    def test_malformed_file_fails_explicitly(self, tmp_path) -> None:
+
+class TestReadErrorCategories:
+    def test_malformed_file_fails_as_invalid_document(self, tmp_path) -> None:
         path = fixtures.build_malformed(tmp_path / "malformed.docx")
         with pytest.raises(DocxReadError) as excinfo:
             read_document(path)
-        assert str(excinfo.value)
+        assert excinfo.value.reason == "invalid-or-unreadable-document"
+        assert excinfo.value.detail
+
+    def test_ole_container_fails_as_invalid_document(self, tmp_path) -> None:
+        # Password-protected Word documents arrive in an OLE compound-file
+        # container; it must fail explicitly rather than open as empty.
+        path = fixtures.build_ole_container(tmp_path / "protected.docx")
+        with pytest.raises(DocxReadError) as excinfo:
+            read_document(path)
+        assert excinfo.value.reason == "invalid-or-unreadable-document"
+
+    def test_unexpected_parser_error_keeps_its_own_category(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = fixtures.build_normal(tmp_path / "normal.docx")
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("injected programmer bug")
+
+        monkeypatch.setattr("design_requirement_checker.docx_adapter._collect_body", boom)
+        with pytest.raises(DocxReadError) as excinfo:
+            read_document(path)
+        assert excinfo.value.reason == "unexpected-parser-error"
 
 
 class TestImmutabilityAndIdentity:
@@ -296,6 +450,10 @@ class TestImmutabilityAndIdentity:
             fixtures.build_docdefaults_strike,
             fixtures.build_tracked_revisions,
             fixtures.build_excluded_parts,
+            fixtures.build_hyperlink,
+            fixtures.build_header_variants,
+            fixtures.build_custom_default_style,
+            fixtures.build_unsupported_structures,
             fixtures.build_empty,
         )
         for index, builder in enumerate(builders):

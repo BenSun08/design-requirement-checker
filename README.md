@@ -178,6 +178,10 @@ The owner selected Python + PySide6 / Qt Widgets and approved the shared
 development, CI, and Windows packaging foundation. The S1/S2 document-ingestion
 spike has been executed (macOS; python-docx 1.2.0 + focused OOXML access
 selected — see the technical-spike evidence), and the Task 2 vertical slice
-implements real DOCX import and viewing end-to-end. Matching (S6), storage,
-background execution and real Windows no-admin/offline deployment evidence are
-still pending. See the implementation plan for subsequent slices.
+implements real DOCX import and viewing end-to-end; a review-driven remediation
+slice closed its ingestion/coverage gaps (hyperlink-wrapped runs, header/footer
+variants, unsupported-structure detection, default-style resolution, error
+categories, preview whitespace — see the technical-spike evidence). Matching
+(S6), storage, background execution and real Windows no-admin/offline
+deployment evidence are still pending. See the implementation plan for
+subsequent slices.

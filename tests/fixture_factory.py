@@ -16,6 +16,7 @@ from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
+from docx.shared import Inches
 
 NSDECL = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -191,6 +192,159 @@ def build_excluded_parts(path: Path) -> Path:
         )
     )
     doc.save(path)
+    return path
+
+
+def build_hyperlink(path: Path) -> Path:
+    """Hyperlink-wrapped runs (w:anchor links need no relationships):
+    prefix/link/suffix order with a struck link run, a multi-run link, a link
+    inside a table cell, and an invalid nested hyperlink whose inner run is
+    invisible to paragraph.runs, iter_inner_content and Hyperlink.runs."""
+    doc = Document()
+    p0 = doc.add_paragraph()
+    p0.add_run("Prefix ")
+    p0._p.append(
+        _raw(
+            f'<w:hyperlink {NSDECL} w:anchor="bm1">'
+            "<w:r><w:rPr><w:strike/></w:rPr><w:t>hyperlink text</w:t></w:r>"
+            "</w:hyperlink>"
+        )
+    )
+    p0.add_run(" suffix")
+    p1 = doc.add_paragraph()
+    p1._p.append(
+        _raw(
+            f'<w:hyperlink {NSDECL} w:anchor="bm2">'
+            "<w:r><w:t>linkA</w:t></w:r>"
+            "<w:r><w:rPr><w:strike/></w:rPr><w:t>linkB</w:t></w:r>"
+            "</w:hyperlink>"
+        )
+    )
+    cell_paragraph = doc.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0]
+    cell_paragraph._p.append(
+        _raw(f'<w:hyperlink {NSDECL} w:anchor="bm3"><w:r><w:t>cell link</w:t></w:r></w:hyperlink>')
+    )
+    p2 = doc.add_paragraph()
+    p2._p.append(
+        _raw(
+            f'<w:hyperlink {NSDECL} w:anchor="bm4">'
+            "<w:r><w:t>outer</w:t></w:r>"
+            f'<w:hyperlink {NSDECL} w:anchor="bm5"><w:r><w:t>nested</w:t></w:r></w:hyperlink>'
+            "</w:hyperlink>"
+        )
+    )
+    doc.save(path)
+    return path
+
+
+def build_header_variants(path: Path) -> Path:
+    """Default and first-page headers with paragraph text, plus an even-page
+    footer whose only meaningful content is a table cell."""
+    doc = Document()
+    doc.add_paragraph("visible body")
+    section = doc.sections[0]
+    section.different_first_page_header_footer = True
+    doc.settings.odd_and_even_pages_header_footer = True
+    section.header.paragraphs[0].add_run("DEFAULT HEADER")
+    section.first_page_header.paragraphs[0].add_run("FIRST PAGE HEADER")
+    even_footer = section.even_page_footer
+    footer_table = even_footer.add_table(1, 1, Inches(2))
+    footer_table.cell(0, 0).paragraphs[0].add_run("EVEN FOOTER TABLE CELL")
+    doc.save(path)
+    return path
+
+
+def build_custom_default_style(path: Path) -> Path:
+    """The default paragraph style is 'CorpBody' (w:default='1'), not 'Normal';
+    'Normal' keeps no strike while CorpBody carries one, so paragraphs without
+    an explicit pStyle must resolve strike through CorpBody."""
+    doc = Document()
+    styles = doc.styles.element
+    normal = next(
+        style for style in styles.findall(qn("w:style")) if style.get(qn("w:styleId")) == "Normal"
+    )
+    normal.attrib.pop(qn("w:default"), None)
+    styles.append(
+        _raw(
+            f'<w:style {NSDECL} w:type="paragraph" w:default="1" w:styleId="CorpBody">'
+            '<w:name w:val="CorpBody"/><w:qFormat/>'
+            "<w:rPr><w:strike/></w:rPr>"
+            "</w:style>"
+        )
+    )
+    doc.add_paragraph("plain inherits CorpBody strike")
+    p1 = doc.add_paragraph()
+    p1.add_run("explicit off").font.strike = False
+    doc.save(path)
+    return path
+
+
+def build_unsupported_structures(path: Path) -> Path:
+    """Field codes (complex w:instrText and simple w:fldSimple), footnote and
+    endnote references, a body-level w:altChunk and a w:smartTag wrapping a
+    run — content that stays outside the supported scope and must never allow
+    a silent COMPLETE result."""
+    doc = Document()
+    doc.add_paragraph("intro")
+    p_field = doc.add_paragraph()
+    for fragment in (
+        f'<w:r {NSDECL}><w:fldChar w:fldCharType="begin"/></w:r>',
+        f'<w:r {NSDECL}><w:instrText xml:space="preserve"> REF _Ref1 \\h </w:instrText></w:r>',
+        f'<w:r {NSDECL}><w:fldChar w:fldCharType="separate"/></w:r>',
+        f"<w:r {NSDECL}><w:t>field result text</w:t></w:r>",
+        f'<w:r {NSDECL}><w:fldChar w:fldCharType="end"/></w:r>',
+    ):
+        p_field._p.append(_raw(fragment))
+    p_simple = doc.add_paragraph()
+    p_simple._p.append(
+        _raw(
+            f'<w:fldSimple {NSDECL} w:instr=" REF _Ref2 \\h ">'
+            "<w:r><w:t>fldSimple cached result</w:t></w:r>"
+            "</w:fldSimple>"
+        )
+    )
+    p_note = doc.add_paragraph()
+    p_note.add_run("body with footnote")
+    p_note._p.append(_raw(f'<w:r {NSDECL}><w:footnoteReference w:id="2"/></w:r>'))
+    p_end = doc.add_paragraph()
+    p_end.add_run("body with endnote")
+    p_end._p.append(_raw(f'<w:r {NSDECL}><w:endnoteReference w:id="2"/></w:r>'))
+    p_tag = doc.add_paragraph()
+    p_tag._p.append(
+        _raw(
+            f'<w:smartTag {NSDECL} w:element="city">'
+            "<w:r><w:t>smart tag text</w:t></w:r>"
+            "</w:smartTag>"
+        )
+    )
+    p_tag.add_run(" tail")
+    # altChunk at body level, before sectPr, referencing an absent relationship
+    # (the package opens fine; only the reference is kept for detection).
+    sect_pr = doc.element.body.find(qn("w:sectPr"))
+    sect_pr.addprevious(
+        _raw(
+            f'<w:altChunk {NSDECL} r:id="rId100" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>'
+        )
+    )
+    doc.add_paragraph("clean paragraph")
+    doc.save(path)
+    return path
+
+
+def build_ole_container(path: Path) -> Path:
+    """The 512-byte OLE compound-file header Word produces for password-
+    protected documents (signature D0 CF 11 E0 A1 B1 1A E1). Not a ZIP/OOXML
+    package; exercises the container-format failure path only — not a full
+    encrypted-document validation."""
+    header = bytearray(512)
+    header[0:8] = bytes.fromhex("d0cf11e0a1b11ae1")
+    header[24:26] = (0x003E).to_bytes(2, "little")  # minor version
+    header[26:28] = (0x0003).to_bytes(2, "little")  # major version
+    header[28:30] = (0xFFFE).to_bytes(2, "little")  # little-endian byte order
+    header[30:32] = (0x0009).to_bytes(2, "little")  # 512-byte sectors
+    header[32:34] = (0x0006).to_bytes(2, "little")  # 64-byte mini sectors
+    path.write_bytes(bytes(header))
     return path
 
 

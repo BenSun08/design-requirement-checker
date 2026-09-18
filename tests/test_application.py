@@ -38,8 +38,17 @@ class TestImportDocument:
         outcome = import_document(path)
         assert isinstance(outcome, ImportFailure)
         assert outcome.filename == "malformed.docx"
-        assert outcome.reason == "unreadable-file"
+        assert outcome.reason == "invalid-or-unreadable-document"
         assert outcome.detail
+
+    def test_ole_container_returns_explicit_failure(self, tmp_path) -> None:
+        # Password-protected Word documents arrive in an OLE compound-file
+        # container; the import must fail explicitly, not open as empty.
+        path = fixtures.build_ole_container(tmp_path / "protected.docx")
+        outcome = import_document(path)
+        assert isinstance(outcome, ImportFailure)
+        assert outcome.filename == "protected.docx"
+        assert outcome.reason == "invalid-or-unreadable-document"
 
     def test_missing_file_returns_access_failure(self, tmp_path) -> None:
         outcome = import_document(tmp_path / "does-not-exist.docx")

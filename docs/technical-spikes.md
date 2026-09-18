@@ -99,19 +99,83 @@ Environment (recorded from the actual probe run):
 4. Every unknown strike value in probe output carries an explicit reason
    (asserted by test); unknown is never converted to false.
 
+### Task 2 remediation — ingestion/coverage evidence (2026-09-18)
+
+Executed as a bounded remediation of the Task 2 slice on the same macOS
+development environment (python-docx 1.2.0, lxml 6.1.3, PySide6 6.11.2,
+Python 3.13.7). All observations below are covered by hand-labelled
+regression fixtures in `tests/fixture_factory.py` and tests in
+`tests/test_docx_adapter.py`, `tests/test_application.py`,
+`tests/test_ui.py`.
+
+- **Hyperlink-wrapped runs are extracted.** Observed: `paragraph.runs` omits
+  runs inside `w:hyperlink` (python-docx 1.2.0's `paragraph.text` includes
+  them, but the Task 2 adapter reconstructed block text from `paragraph.runs`,
+  so "Prefix [hyperlink text] suffix" lost its middle run and its strike).
+  `Paragraph.iter_inner_content()` yields Run|Hyperlink in document order and
+  `Hyperlink.runs` preserves text and direct strike, so the adapter now
+  extracts hyperlink runs with contiguous offsets and resolved strike; the
+  link URL itself is never document text. A hyperlink nested inside another
+  hyperlink (invalid OOXML) stays invisible to every run accessor and produces
+  `nested-hyperlink-content-excluded` instead of silent loss.
+- **Header/footer variants are detected.** Observed: first-page and even-page
+  headers/footers (`w:titlePg`, odd-and-even settings) and table-only
+  header/footer content were previously missed. All six variants are now
+  checked for paragraph and table content; each side keeps one stable token
+  (`header-content-not-checked` / `footer-content-not-checked`) across all
+  variants, and the content never enters body blocks. Reading `.paragraphs`
+  of a linked-to-previous container creates a header part in the in-memory
+  package, so the adapter checks `is_linked_to_previous` before any content
+  access.
+- **Known unsupported structures force LIMITED.** Observed silent losses in
+  `paragraph.runs`: `w:fldSimple` cached-result runs and `w:smartTag`-wrapped
+  runs. Complex-field runs (`w:fldChar`/`w:instrText`) produce empty-text runs
+  whose field result (a direct paragraph child) stays extracted. The adapter
+  now detects `w:instrText`, `w:fldSimple`, `w:footnoteReference`,
+  `w:endnoteReference`, `w:smartTag` and body-level `w:altChunk` with stable
+  tokens (`field-code-content-excluded`, `footnote-or-endnote-content-excluded`,
+  `smart-tag-content-excluded`, `alt-chunk-content-excluded`); none of them
+  can yield a silent COMPLETE result. No field evaluation, footnote or
+  altChunk extraction is attempted.
+- **Default paragraph style resolved from the marker, not the id.** The
+  default paragraph style is the `w:style` with `w:type="paragraph"` and
+  `w:default="1"` (the shipped template marks "Normal"; a fixture with
+  `CorpBody` as the default id resolves inherited strike correctly). If the
+  marker is absent or ambiguous, no default style is fabricated and the chain
+  falls back to docDefaults.
+- **Read-failure categories.** `file-access-error` (OSError while reading),
+  `invalid-or-unreadable-document` (BadZipFile, missing package parts,
+  invalid XML — including the OLE compound-file container Word produces for
+  password-protected documents, exercised by the deterministic
+  `build_ole_container` fixture), and `unexpected-parser-error` (an injected
+  collection bug is reported under its own category and never mislabelled as
+  an invalid document). The broad `except Exception` around strike parsing was
+  removed: `w:strike`/`w:dstrike` are read element-level, classifying invalid
+  ST_OnOff values as unknown-with-reason without catching programmer errors.
+- **Preview whitespace.** Qt's rich-text engine collapses runs of spaces in
+  plain `<p>` elements ("A  B\tC" renders as "A B C"); run paragraphs now use
+  `white-space: pre-wrap`, verified by a QTextDocument round-trip test. The
+  domain text is unchanged.
+- **Windows build.** Source-level CI (macOS + Windows, Python 3.13) covers the
+  remediation commit; the manually triggered PyInstaller workflow
+  (`build-windows.yml`) was **not run** for this slice and remains pending
+  (see the implementation plan). This is not S3 evidence.
+
 ### Not probed / remaining limitations
 
 - Table-style character formatting, linked styles, `w:rPrChange` tracked
-  formatting, field codes (`w:instrText`), hyperlink-wrapped runs,
-  footnotes/endnotes, first-page/even-page headers, password-protected
-  (encrypted) OOXML, `w:altChunk`, oversized documents.
+  formatting, hidden text (`w:vanish`), comments, block-level `w:customXml`,
+  oversized documents.
+- Encrypted/password-protected DOCX: only the OLE container-format failure
+  path is exercised (explicit import failure). No decryption exists and no
+  real Office-produced encrypted files were validated.
 - Only synthetic fixtures on macOS; no sanitized real customer documents, no
-  Windows execution. CI runs the same tests on windows-latest, which is still
-  not S3 deployment evidence.
+  Windows execution beyond CI. CI runs the same tests on windows-latest,
+  which is still not S3 deployment evidence.
 - The normalization allowlist is deliberately minimal (whitespace collapse);
   punctuation/width mappings remain an S6 output.
-- Effort: executed within a single bounded session, inside the combined S1+S2
-  timebox guidance.
+- Effort: S1/S2 executed within a single bounded session, inside the combined
+  S1+S2 timebox guidance; the remediation was a second bounded session.
 
 ### Unresolved questions
 

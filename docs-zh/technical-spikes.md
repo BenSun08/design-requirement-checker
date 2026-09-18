@@ -93,15 +93,65 @@ S1/S2 前记录可用开发／构建解释器、权限、Windows 构建机及候
 4. 探测输出中每个 unknown 删除线都带有明确原因（测试断言）；unknown 绝不
    转换为 false。
 
+### Task 2 修复 — 摄取／覆盖率证据（2026-09-18）
+
+作为对 Task 2 切片的有限修复，在同一 macOS 开发环境执行（python-docx
+1.2.0、lxml 6.1.3、PySide6 6.11.2、Python 3.13.7）。以下全部观察都由
+`tests/fixture_factory.py` 中的手写标注回归夹具与 `tests/test_docx_adapter.py`、
+`tests/test_application.py`、`tests/test_ui.py` 中的测试覆盖。
+
+- **超链接包裹的 run 已被提取。** 观察：`paragraph.runs` 遗漏 `w:hyperlink`
+  内的 run（python-docx 1.2.0 的 `paragraph.text` 包含它们，但 Task 2 适配器
+  从 `paragraph.runs` 重建块文本，"Prefix [hyperlink text] suffix" 因此丢失
+  中间 run 及其删除线）。`Paragraph.iter_inner_content()` 按文档顺序产出
+  Run|Hyperlink，`Hyperlink.runs` 保留文本与直接删除线，适配器现在以连续
+  偏移和已解析的删除线提取超链接 run；链接 URL 本身绝不进入文档文本。
+  超链接内再嵌套超链接（无效 OOXML）对所有 run 访问器均不可见，产生
+  `nested-hyperlink-content-excluded` 而非静默丢失。
+- **页眉／页脚变体已被检测。** 观察：首页／偶数页页眉页脚（`w:titlePg`、
+  奇偶页设置）及仅含表格的页眉／页脚内容此前被遗漏。现在全部六种变体都
+  检查段落与表格内容；每一侧在所有变体上保持一个稳定 token
+  （`header-content-not-checked` / `footer-content-not-checked`），且内容
+  绝不进入正文块。读取 linked-to-previous 容器的 `.paragraphs` 会在内存包中
+  创建页眉部件，因此适配器在任何内容访问前先检查 `is_linked_to_previous`。
+- **已知不支持结构强制 LIMITED。** 观察 `paragraph.runs` 中的静默丢失：
+  `w:fldSimple` 缓存结果 run 与 `w:smartTag` 包裹的 run。复杂字段 run
+  （`w:fldChar`/`w:instrText`）产生空文本 run，其字段结果（段落直接子级）
+  保持提取。适配器现在以稳定 token 检测 `w:instrText`、`w:fldSimple`、
+  `w:footnoteReference`、`w:endnoteReference`、`w:smartTag` 与正文级
+  `w:altChunk`（`field-code-content-excluded`、
+  `footnote-or-endnote-content-excluded`、`smart-tag-content-excluded`、
+  `alt-chunk-content-excluded`）；它们都不会产生静默 COMPLETE 结果。不尝试
+  字段求值、脚注或 altChunk 提取。
+- **默认段落样式从标记解析，而非 id。** 默认段落样式是带
+  `w:type="paragraph"` 与 `w:default="1"` 的 `w:style`（随附模板标记的是
+  "Normal"；以 `CorpBody` 为默认 id 的夹具正确解析继承删除线）。标记缺失或
+  歧义时不虚构默认样式，链回退到 docDefaults。
+- **读取失败类别。** `file-access-error`（读取时 OSError）、
+  `invalid-or-unreadable-document`（BadZipFile、缺失包部件、无效 XML——包括
+  Word 为密码保护文档生成的 OLE 复合文件容器，由确定性
+  `build_ole_container` 夹具演练），以及 `unexpected-parser-error`（注入的
+  收集 bug 归入自身类别，绝不误标为无效文档）。删除线解析外围的宽泛
+  `except Exception` 已移除：`w:strike`/`w:dstrike` 按元素级读取，非法
+  ST_OnOff 值归类为带原因的 unknown，不再捕获程序员错误。
+- **预览空白。** Qt 富文本引擎会折叠普通 `<p>` 元素中的连续空格
+  （"A  B\tC" 渲染为 "A B C"）；run 段落现在使用
+  `white-space: pre-wrap`，并经 QTextDocument 往返测试验证。领域文本不变。
+- **Windows 构建。** 源码级 CI（macOS + Windows，Python 3.13）覆盖修复
+  提交；手动触发的 PyInstaller 工作流（`build-windows.yml`）本切片**未
+  运行**，仍待执行（见实施计划）。这不构成 S3 证据。
+
 ### 未探测／剩余限制
 
-- 表格样式字符格式、链接样式、`w:rPrChange` 修订格式、域代码
-  （`w:instrText`）、超链接包裹的 run、脚注／尾注、首页／偶数页页眉、
-  密码保护（加密）OOXML、`w:altChunk`、超大文档。
-- 仅在 macOS 上使用合成夹具；无脱敏真实客户文档、无 Windows 执行。CI 会在
-  windows-latest 上运行相同测试，但仍不构成 S3 部署证据。
+- 表格样式字符格式、链接样式、`w:rPrChange` 修订格式、隐藏文本
+  （`w:vanish`）、批注、块级 `w:customXml`、超大文档。
+- 加密／密码保护 DOCX：仅演练了 OLE 容器格式失败路径（显式导入失败）。
+  不存在解密能力，也未验证真实 Office 生成的加密文件。
+- 仅在 macOS 上使用合成夹具；无脱敏真实客户文档，除 CI 外无 Windows 执行。
+  CI 会在 windows-latest 上运行相同测试，但仍不构成 S3 部署证据。
 - 规范化白名单刻意最小（仅空白折叠）；标点／全半角映射仍为 S6 输出。
-- 投入：在单个有限会话内完成，处于 S1+S2 合并时间预算指引之内。
+- 投入：S1/S2 在单个有限会话内完成，处于 S1+S2 合并时间预算指引之内；
+  本次修复是第二个有限会话。
 
 ### 未决问题
 
