@@ -231,9 +231,9 @@ The current:
 src/design_requirement_checker/ui/main_window.py
 ```
 
-is still a skeleton.
+implements the first vertical slice: importing and inspecting a real DOCX.
 
-It builds a `QMainWindow` containing labels, layouts, buttons, and a horizontal splitter. The DOCX import, checking, and checklist-management buttons are intentionally disabled because the corresponding functionality has not yet been implemented.
+It builds a `QMainWindow` containing labels, layouts, buttons, and a document panel. The DOCX import button is enabled: clicking it opens a file dialog, calls the application-layer import use case, and displays the resulting filename, fingerprint, coverage warnings and text blocks (with strikethrough formatting) in a `QTextBrowser`. Parsing itself lives outside the widgets — the window only renders domain values returned by the application layer. The checking and checklist-management buttons remain disabled because that functionality has not yet been implemented.
 
 The basic hierarchy is approximately:
 
@@ -248,16 +248,17 @@ QMainWindow
         │      "设计需求核查工具"
         │
         ├── QLabel
-        │      initialization notice
+        │      status notice
         │
         ├── QHBoxLayout
-        │   ├── QPushButton
-        │   ├── QPushButton
-        │   └── QPushButton
+        │   ├── QPushButton   (enabled: 导入 DOCX)
+        │   ├── QPushButton   (disabled)
+        │   └── QPushButton   (disabled)
         │
-        └── QSplitter
-            ├── "检查项"
-            └── "证据与对比"
+        └── QGroupBox "文档"
+            ├── QLabel        (summary)
+            ├── QLabel        (warnings)
+            └── QTextBrowser  (blocks)
 ```
 
 This introduces another important Qt concept.

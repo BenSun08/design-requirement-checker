@@ -6,6 +6,13 @@ The task descriptions below remain the broader plan; the skeleton does not
 complete Task 1 or Task 2. Their references to absent source describe the state
 before this initialization slice.
 
+**2026-09-18 execution records:** Task 1 S1/S2 spikes executed (macOS, synthetic
+fixtures) — see [technical-spikes.md](technical-spikes.md). Task 2 first DOCX
+vertical slice executed on the same day: domain value models, the validated
+python-docx 1.2.0 + focused OOXML adapter, import coordination and a minimal
+Qt document view, test-first. Matching, baseline persistence, background
+execution and Windows validation remain future tasks.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
@@ -85,12 +92,12 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Consumes:** local file selection and immutable input bytes. **Produces:** Document with paragraph blocks, original runs/effective strike, stable snapshot locations and coverage warnings, or an explicit failure.
 
-- [ ] Write fixture assertions for paragraph text, table/cell origin, split runs, style inheritance and unsupported/protected/malformed inputs.
-- [ ] Demonstrate tests fail for the absent/incorrect behavior before implementing the adapter.
-- [ ] Implement the minimum extraction and domain validation under the confirmed scope; no cross-paragraph/cell matching.
-- [ ] Show selected filename, blocks and formatting in a minimal Qt Widgets window; parsing stays outside widgets.
-- [ ] Check original bytes unchanged, source locations reproducible and LIMITED/failed states distinct from empty successful content.
-- [ ] Run focused tests and the configured project checks; review the bounded diff and update documented limitations.
+- [x] Write fixture assertions for paragraph text, table/cell origin, split runs, style inheritance and unsupported/protected/malformed inputs. Done 2026-09-18 in tests/test_domain.py, tests/test_docx_adapter.py, tests/test_application.py and tests/test_ui.py with hand-written labels, reusing the spike fixture factory.
+- [x] Demonstrate tests fail for the absent/incorrect behavior before implementing the adapter. All four new test modules failed on collection (ImportError) before implementation; observed in the Task 2 run log.
+- [x] Implement the minimum extraction and domain validation under the confirmed scope; no cross-paragraph/cell matching. domain.py (validated value models), docx_adapter.py (python-docx 1.2.0 + focused OOXML/XML access ported from the validated spike probe), application.py (import_document -> Document or ImportFailure).
+- [x] Show selected filename, blocks and formatting in a minimal Qt Widgets window; parsing stays outside widgets. ui/main_window.py renders filename, coverage warnings and blocks with strike markers; it only calls the application use case (import deferred until first use so startup stays adapter-free).
+- [x] Check original bytes unchanged, source locations reproducible and LIMITED/failed states distinct from empty successful content. Asserted by test_docx_adapter (sha256 before/after, repeated-read stability) and test_ui (LIMITED warnings, explicit failure, empty document distinct).
+- [x] Run focused tests and the configured project checks; review the bounded diff and update documented limitations. 87 tests passed; ruff check, ruff format --check, mypy (strict), pip check and git diff --check all pass. Known limitations: parsing runs on the UI thread during import (background execution is Task 4); Windows and real-document validation pending.
 
 **Acceptance:** real input→real block→visible source works. No matching yet. Unrecognized formatting is not silently active text; unsupported content does not disappear without a scope warning.
 
@@ -170,7 +177,7 @@ A slice is complete only when its acceptance evidence exists, failures and scope
 
 ## Next authorized decision
 
-This update closes technology selection and records product policies. S1/S2 of Task 1 have now been executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)): the Python DOCX access strategy is selected and Task 2 is unblocked. The next proposed work package is Task 2 (first DOCX vertical slice), pending explicit execution authorization. The remaining Task 1 probes (S3, S6, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts production scaffolding automatically.
+This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. The next proposed work package is Task 3 (deterministic verification), pending explicit execution authorization. The remaining Task 1 probes (S3, S6, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 

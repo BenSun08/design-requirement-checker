@@ -1,6 +1,10 @@
 # Design Requirement Checker
 
-**Python + PySide6 / Qt Widgets desktop skeleton.** Production stack is selected and the DOCX access strategy is validated by executed S1/S2 spike evidence; production ingestion, matching, persistence and Windows distribution remain pending.
+**Python + PySide6 / Qt Widgets desktop application.** Document ingestion is
+implemented as a validated vertical slice: import a real `.docx`, view its
+blocks with effective-strike formatting and honest coverage warnings. The DOCX
+access strategy is backed by executed S1/S2 spike evidence. Matching,
+persistence and Windows distribution remain pending.
 
 ## Development platforms
 
@@ -73,17 +77,29 @@ Open the repository in VS Code or Cursor, select the interpreter from the local
 `.vscode/launch.json` starts the `design_requirement_checker` module and contains
 no developer-specific or operating-system-specific interpreter path.
 
-The window contains a title, an initialization notice and a split workspace.
-Future import/check/manage buttons are disabled. It reads no DOCX, generates no
-results and stores no baseline. `prototype/` remains a separate historical mock.
+The window contains a title, an import action and a document view. Import a
+`.docx` to see its filename, fingerprint, coverage warnings and text blocks
+with strike formatting; parsing happens outside the widgets. Check and
+checklist-management actions remain disabled. It generates no results and
+stores no baseline. `prototype/` remains a separate historical mock.
 
 ## Source layout
 
 - `src/design_requirement_checker/__main__.py`: startup and Qt composition.
-- `src/design_requirement_checker/ui/main_window.py`: minimal desktop window.
-- `domain.py`, `application.py`, `matching.py`, `docx_adapter.py`, `baseline_store.py`
-  inside the package: documented responsibility boundaries only; no business APIs yet.
-- `tests/test_startup.py`: real Qt startup/show/close smoke test in a subprocess.
+- `src/design_requirement_checker/domain.py`: validated document-snapshot value
+  models (blocks, runs, locations, coverage); no Qt/filesystem imports.
+- `src/design_requirement_checker/docx_adapter.py`: OOXML ingestion via
+  python-docx 1.2.0 + focused OOXML/XML access; the only module touching
+  python-docx objects; returns domain values.
+- `src/design_requirement_checker/application.py`: import coordination
+  (`import_document` → Document or explicit ImportFailure).
+- `src/design_requirement_checker/ui/main_window.py`: minimal Qt document view;
+  calls the application use case only.
+- `matching.py` and `baseline_store.py` inside the package: documented
+  responsibility boundaries only; no business APIs yet.
+- `tests/test_domain.py`, `tests/test_docx_adapter.py`, `tests/test_application.py`,
+  `tests/test_ui.py`, `tests/test_startup.py`: Task 2 vertical-slice tests with
+  hand-written expected labels.
 - `tests/fixture_factory.py`, `tests/docx_probe.py`, `tests/test_spike_s1_oxml_fidelity.py`,
   `tests/test_spike_s2_locations_coverage.py`: S1/S2 spike — deterministic synthetic
   DOCX fixtures, exploratory python-docx + OOXML probe, and evidence tests with
@@ -161,6 +177,7 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 The owner selected Python + PySide6 / Qt Widgets and approved the shared
 development, CI, and Windows packaging foundation. The S1/S2 document-ingestion
 spike has been executed (macOS; python-docx 1.2.0 + focused OOXML access
-selected — see the technical-spike evidence). Matching (S6), storage, and real
-Windows no-admin/offline deployment evidence are still pending. See the
-implementation plan for subsequent slices.
+selected — see the technical-spike evidence), and the Task 2 vertical slice
+implements real DOCX import and viewing end-to-end. Matching (S6), storage,
+background execution and real Windows no-admin/offline deployment evidence are
+still pending. See the implementation plan for subsequent slices.

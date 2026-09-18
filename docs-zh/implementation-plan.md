@@ -7,6 +7,12 @@
 本次未完成下文 Task 1 技术验证或 Task 2 真实 DOCX 纵向切片；下文关于源码尚未
 创建的描述属于初始化之前的规划状态。
 
+**2026-09-18 执行记录：** Task 1 的 S1/S2 实验已执行（macOS、合成夹具），
+见 [technical-spikes.md](../docs/technical-spikes.md)。Task 2 首个 DOCX 纵向切片
+已于同日执行：领域值模型、经 S1/S2 验证的 python-docx 1.2.0 ＋针对性 OOXML
+适配器、导入协调与最小 Qt 文档视图，测试先行。匹配、基准持久化、后台执行与
+Windows 验证仍属后续任务。
+
 [English source](../docs/implementation-plan.md)
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。
@@ -87,12 +93,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 **输入：**本地文件选择、不可变字节。**输出：**带段落块、原始 run／有效删除线、快照稳定位置和范围提示的 Document，或明确失败。
 
-- [ ] 编写段落文本、表格／单元格来源、拆分 run、样式继承及不支持／受保护／损坏文件断言。
-- [ ] 实现前证明缺失／错误行为导致测试失败。
-- [ ] 在已确认范围内实现最小提取及领域校验，不跨段落／单元格匹配。
-- [ ] 最小 Qt Widgets 窗口显示文件名、块与格式，解析留在 widgets 外。
-- [ ] 检查原件不变、位置可重现、LIMITED／失败区别于成功空内容。
-- [ ] 执行针对性及已配置全项目检查，审查有限 diff，更新限制。
+- [x] 编写段落文本、表格／单元格来源、拆分 run、样式继承及不支持／受保护／损坏文件断言。2026-09-18 完成于 tests/test_domain.py、tests/test_docx_adapter.py、tests/test_application.py 与 tests/test_ui.py，期望标签手写并复用实验夹具工厂。
+- [x] 实现前证明缺失／错误行为导致测试失败。四个新测试模块在实现前均收集失败（ImportError），见 Task 2 运行记录。
+- [x] 在已确认范围内实现最小提取及领域校验，不跨段落／单元格匹配。domain.py（带校验的值模型）、docx_adapter.py（由已验证的实验探测移植的 python-docx 1.2.0 ＋针对性 OOXML/XML 访问）、application.py（import_document → Document 或 ImportFailure）。
+- [x] 最小 Qt Widgets 窗口显示文件名、块与格式，解析留在 widgets 外。ui/main_window.py 渲染文件名、覆盖警告与带删除线标记的文本块；仅调用应用层用例（导入延迟到首次使用，启动组装不加载文档适配器）。
+- [x] 检查原件不变、位置可重现、LIMITED／失败区别于成功空内容。由 test_docx_adapter（前后 sha256、重复读取稳定性）与 test_ui（LIMITED 警告、显式失败、空文档可区分）断言。
+- [x] 执行针对性及已配置全项目检查，审查有限 diff，更新限制。87 项测试通过；ruff check、ruff format --check、mypy（strict）、pip check、git diff --check 全部通过。已知限制：导入期间解析在 UI 线程执行（后台执行属任务 4）；Windows 与真实文档验证待补。
 
 **验收：**真实输入→真实块→可见来源成立，暂不做匹配。未知格式不默认为正常；不支持内容不会无提示消失。
 
@@ -173,10 +179,11 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 ## 下一项授权决定
 
 本次关闭技术选择并记录规则。任务 1 的 S1/S2 已执行并记录证据（2026-09-18，macOS；见
-[technical-spikes.md](../docs/technical-spikes.md)）：Python DOCX 访问方式已选定，任务 2
-已解除阻塞。建议的下个工作包为任务 2（首个 DOCX 垂直切片），等待明确执行授权。任务 1
-剩余实验（S3、S6、持久化验证）仍待执行，需各自的授权及 Windows／样本访问。不重新开放
-技术栈，不自动开始生产脚手架。
+[technical-spikes.md](../docs/technical-spikes.md)）；任务 2（首个 DOCX 垂直切片）已于
+同日经用户授权执行：在 macOS 开发机上"真实输入→真实块→可见来源"端到端成立。建议的
+下个工作包为任务 3（确定性核查），等待明确执行授权。任务 1 剩余实验（S3、S6、持久化
+验证）仍待执行，需各自的授权及 Windows／样本访问。不重新开放技术栈，不自动开始下一
+个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境
 
