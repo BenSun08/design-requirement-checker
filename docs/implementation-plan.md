@@ -71,7 +71,7 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 - [ ] Establish the approved development/build environment, preserving company Python 3.8; record whether an isolated newer interpreter is permitted and verify candidate dependency compatibility before installing anything.
 - [ ] Prepare normal/table/mixed-run/full/partial/inherited-strike and contradictory-evidence fixtures, plus sanitized representative samples.
-- [ ] Run S1/S2 to select the Python DOCX access strategy and establish source/coverage behavior.
+- [x] Run S1/S2 to select the Python DOCX access strategy and establish source/coverage behavior. Executed 2026-09-18 on the macOS development machine with synthetic fixtures and independent labels; evidence and limitations recorded in [technical-spikes.md](technical-spikes.md). Selected: python-docx 1.2.0 + focused OOXML/XML access; unknown formatting preserved; merged-cell/tracked-revision/excluded-structure hazards made explicit. Windows/S3 and real-document evidence remain open.
 - [ ] Run S3 on both Windows target families as a standard user; test portable distribution first and record policy restrictions.
 - [ ] Run S6 for transformation allowlist, specific detection phrases, requirement-span association and performance/cancellation limits.
 - [ ] Validate one-baseline storage/recovery and choose a user-writable path/format.
@@ -170,7 +170,7 @@ A slice is complete only when its acceptance evidence exists, failures and scope
 
 ## Next authorized decision
 
-This update closes technology selection and records product policies. The next proposed work package is Task 1 (bounded S1/S2/S3/S6 and persistence validation), pending explicit execution authorization and required Windows/sample access. It does not re-open the selected stack or start production scaffolding automatically.
+This update closes technology selection and records product policies. S1/S2 of Task 1 have now been executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)): the Python DOCX access strategy is selected and Task 2 is unblocked. The next proposed work package is Task 2 (first DOCX vertical slice), pending explicit execution authorization. The remaining Task 1 probes (S3, S6, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts production scaffolding automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 

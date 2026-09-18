@@ -4,7 +4,7 @@
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。
 
-状态：**已规划，未执行**。用户已选择生产技术栈并确认产品规则 1–7。目标为 Windows 10/11 x64、无管理员／安装权限。本文件规定所选栈内的有限验证，不授权执行实验或生产实现。时间预算为投入上限，不是交付承诺；每周约可投入八小时。
+状态：**S1/S2 已于 2026-09-18 在 macOS 开发机上执行——见下方"已执行证据"。S3、S6 与持久化验证仍为已规划、未执行。**用户已选择生产技术栈并确认产品规则 1–7。目标为 Windows 10/11 x64、无管理员／安装权限。本文件规定所选栈内的有限验证，不授权进一步执行实验或生产实现。时间预算为投入上限，不是交付承诺；每周约可投入八小时。
 
 开发和 CI 在 macOS／Windows 共用 Python 3.13／PySide6 源码；生产仍为
 Windows 10/11 x64。Windows 包只在 Windows 构建，初始候选格式为
@@ -24,6 +24,94 @@ S1/S2 前记录可用开发／构建解释器、权限、Windows 构建机及候
 | S4 桌面／核心 IPC | 从旧候选比较中撤销。所选架构没有 sidecar 或核心服务器。 | 不引入协议或相关工作；响应性由 S6／Qt 验证。 | 0 h；只有新架构决定后才重启。 |
 | S5 未来 DOCX 结构保留 | 延后的参考性实验：打开／保存副本，可选修改一个 run，比较包内部件及 Word 渲染。 | 记录样式／表格／关系的保留与损失；文本相同不等于无损；原件不变。 | 仅另行授权后 2–4 h；编辑仍不在 MVP 时不构成门槛。 |
 | S6 确定性规则与规模 | 审查 detectionPhrase/aliases、关联要求范围；测试规范化白名单、冲突／部分删除线、歧义相似短语及代表性体积。 | 具体短语证明目标功能，宽泛词不算。数值／单位／否定保留。单处变化→CONFIGURED + DIFFERENT；有效值冲突、正常／删除线并存、部分／未知格式→UNRESOLVED。空预期／不支持比较→NOT_COMPARED。记录内存／时间／取消。 | 初始 3–5 h；复杂情况显式待核查，不隐藏启发式猜测。 |
+
+## 已执行证据 — S1 与 S2（2026-09-18）
+
+仅在 macOS 开发机上作为一个有限切片执行。不声称任何 Windows 运行时、干净电脑、打包运行时或真实客户文档证据。
+
+环境（取自实际探测运行记录）：
+
+- 操作系统：macOS 26.7（x86_64）；仅为开发平台，不是生产目标。
+- Python 3.13.7；python-docx 1.2.0（含 lxml 6.1.3）；PySide6 6.11.2 已安装但探测未使用。
+- 探测代码：`tests/docx_probe.py` —— 探索性适配器，刻意与 `src/` 中的生产占位模块隔离。
+- 夹具：`tests/fixture_factory.py` 在每次测试会话中生成九个确定性合成文档
+  （normal、table、nested-merged、strike-matrix、docdefaults-strike、
+  tracked-revisions、excluded-parts、empty、malformed），其中 python-docx
+  无法生成的情况使用小而有注释的原始 OOXML 补丁（dstrike、非法 strike 值、
+  孤儿 rStyle、docDefaults 删除线、w:ins/w:del、w:sdt、文本框、隐藏的
+  vMerge 续接内容）。
+- 预期标注手写在 `tests/test_spike_s1_oxml_fidelity.py` 与
+  `tests/test_spike_s2_locations_coverage.py` 中，不是复制探测输出。
+
+### S1 — OOXML 保真度：观察结果
+
+| 案例（夹具） | 预期（独立标注） | 观察 | 结论 |
+|---|---|---|---|
+| 正文段落文本、拆分 run、相邻同格式 run（normal） | 精确文本；连续的半开码点 run 偏移；空段落是零 run 块 | 一致 | 通过 |
+| 直接删除线 true／显式 false（strike-matrix） | 来自 run rPr 的 True/False | `run.font.strike` 返回直接值 | 通过 |
+| 部分删除线、混合 run（strike-matrix） | 逐 run 为 False/True/False | 一致 | 通过 |
+| 经 basedOn 继承的样式删除线（strike-matrix） | True，来源为段落样式 | `run.font.strike` 为 None（API 看不到样式值）；元素级链式解析可行 | 通过——需要针对性 XML |
+| 继承样式下显式 false 覆盖（strike-matrix） | False，直接值优先 | 一致 | 通过 |
+| docDefaults 删除线（docdefaults-strike） | 经 rPrDefault 为 True；run 显式 false 覆盖 | 经元素级读取 `w:docDefaults` 一致 | 通过——需要针对性 XML |
+| 双删除线 `w:dstrike`（strike-matrix） | 可检测；产品分类待定 | `font.double_strike` 为 True；探测保持有效删除线为 unknown，原因为 `double-strike` | 受限／待定问题 |
+| 非法 `w:strike w:val="maybe"`（strike-matrix） | unknown，绝不为 false | python-docx 在 `font.strike` 上抛出 `InvalidXmlError`；探测归类为 unknown | 通过——保留 unknown |
+| 孤儿 `w:rStyle` 引用（strike-matrix） | unknown | python-docx 的 `run.style` 静默回退到 "Default Paragraph Font"；探测自行检测孤儿引用并报告 unknown | 通过——仅靠 API 不安全 |
+| 修订 `w:ins`/`w:del`（tracked-revisions） | 单独／不支持且明确 | `paragraph.runs`/`.text` 静默遗漏 ins/del 内容；探测将块标记为 LIMITED（`tracked-revisions-unsupported`）并排除修订文本 | 按设计受限 |
+| 损坏输入（malformed） | 明确失败 | `PackageNotFoundError`；覆盖为 FAILED 并带错误信息、零块 | 通过 |
+| 合法的空文档（empty） | COMPLETE、零块、无错误 | 一致；与 FAILED 区分 | 通过 |
+| 原始字节不变（全部可读夹具） | 探测前后文件哈希一致 | 一致 | 通过 |
+
+### S2 — 来源与覆盖：观察结果
+
+| 案例（夹具） | 预期 | 观察 | 结论 |
+|---|---|---|---|
+| 正文段落序号；表格／单元格段落序号；嵌套表祖先路径（normal/table/nested-merged） | 稳定块 id（`body:pN`、`t0r1c1:table-cell:pN`、嵌套 `t0r2c1>t0r0c0:table-cell:p0`），单元格内局部段落序号 | 一致；重复探测结果相同 | 通过 |
+| 多段单元格；不跨段／跨单元格拼接（table） | 各自独立的块 | 一致 | 通过 |
+| 合并单元格（nested-merged） | gridSpan/vMerge 主单元格在其主网格位置只提取一次 | 朴素 `Table.rows[i].cells` 重复合并单元格（确认重复提取风险）；w:tc 级遍历使每个主单元格恰好提取一次 | 通过——需要针对性 XML |
+| 带隐藏文本的 vMerge 续接（nested-merged） | 排除但明确 | 无块；覆盖为 LIMITED `merged-cell-continuation-content-excluded` | 通过 |
+| 拆分 run 重建（全部） | 原始文本等于 run 文本拼接；连续半开偏移 | 每个块一致 | 通过 |
+| 保守规范化＋原始范围映射（normal） | 仅折叠空白；规范化范围映射回精确原始偏移（"B C" → 原始 "B\tC" 位于 [3,6)） | 一致；折叠空白段映射到整个原始空白段 | 通过——白名单定稿推迟到 S6 |
+| 排除结构（excluded-parts） | 页眉／页脚、正文级 `w:sdt` 段落与文本框文本被排除并给出明确 LIMITED 原因 | `doc.paragraphs` 静默遗漏 sdt／文本框内容；探测报告 `header-/footer-content-not-checked`、`content-control-content-excluded`、`textbox-content-excluded` | 通过 |
+| 防重复（全部） | 块 id 唯一；合并文本只出现一次 | 一致 | 通过 |
+| 覆盖诚实性（全部） | 无原因才 COMPLETE；有原因为 LIMITED；FAILED 与合法空文档区分 | 一致 | 通过 |
+
+### 影响 Task 2 的发现
+
+1. **选定适配策略：python-docx 1.2.0 ＋ 针对性 OOXML/XML 访问**（经
+   python-docx 使用 lxml）。对声明的 MVP 范围足够：正文／表格／单元格段落、
+   带码点偏移的 run、保留 unknown 的有效删除线、稳定位置、明确的覆盖警告。
+   依赖已在 `pyproject.toml` 固定。
+2. python-docx API 存在三个静默丢失风险，生产适配器必须补偿：
+   `w:ins`/`w:del` 内的 run 不出现在 `paragraph.runs`/`.text`；
+   `row.cells` 重复合并单元格；正文级 `w:sdt` 与文本框内容对
+   `doc.paragraphs` 不可见。探测通过元素级遍历加明确 LIMITED 原因补偿；
+   生产适配器必须同样处理。
+3. 有效删除线不能只靠 `run.font.strike`（只有直接值；样式／docDefaults 值
+   不可见；孤儿 rStyle 静默回退到默认字符样式）。需要按
+   run rPr → 字符样式链 → 段落样式链 → docDefaults → 默认关闭 的顺序解析，
+   非法值、孤儿／断链和双删除线保留 unknown。
+4. 探测输出中每个 unknown 删除线都带有明确原因（测试断言）；unknown 绝不
+   转换为 false。
+
+### 未探测／剩余限制
+
+- 表格样式字符格式、链接样式、`w:rPrChange` 修订格式、域代码
+  （`w:instrText`）、超链接包裹的 run、脚注／尾注、首页／偶数页页眉、
+  密码保护（加密）OOXML、`w:altChunk`、超大文档。
+- 仅在 macOS 上使用合成夹具；无脱敏真实客户文档、无 Windows 执行。CI 会在
+  windows-latest 上运行相同测试，但仍不构成 S3 部署证据。
+- 规范化白名单刻意最小（仅空白折叠）；标点／全半角映射仍为 S6 输出。
+- 投入：在单个有限会话内完成，处于 S1+S2 合并时间预算指引之内。
+
+### 未决问题
+
+- `w:dstrike` 的产品含义：双删除线应算删除格式（struck）还是保持独立的
+  unknown？探测当前报告 unknown。
+- `w:ins`（修订插入）内的文本是否应包含在提取的块文本中？当前排除并给出
+  LIMITED 原因。
+
+**Task 2 状态：已解除阻塞。** 文档访问策略已凭证据确立；Task 2（首个 DOCX
+垂直切片）可在此基础上实现，等待明确授权。
 
 ## 所选栈内的持久化验证
 

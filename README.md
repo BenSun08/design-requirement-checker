@@ -1,7 +1,6 @@
 # Design Requirement Checker
 
-**Python + PySide6 / Qt Widgets desktop skeleton.** Production stack is selected;
-DOCX ingestion, matching, persistence and Windows distribution remain pending.
+**Python + PySide6 / Qt Widgets desktop skeleton.** Production stack is selected and the DOCX access strategy is validated by executed S1/S2 spike evidence; production ingestion, matching, persistence and Windows distribution remain pending.
 
 ## Development platforms
 
@@ -85,6 +84,10 @@ results and stores no baseline. `prototype/` remains a separate historical mock.
 - `domain.py`, `application.py`, `matching.py`, `docx_adapter.py`, `baseline_store.py`
   inside the package: documented responsibility boundaries only; no business APIs yet.
 - `tests/test_startup.py`: real Qt startup/show/close smoke test in a subprocess.
+- `tests/fixture_factory.py`, `tests/docx_probe.py`, `tests/test_spike_s1_oxml_fidelity.py`,
+  `tests/test_spike_s2_locations_coverage.py`: S1/S2 spike — deterministic synthetic
+  DOCX fixtures, exploratory python-docx + OOXML probe, and evidence tests with
+  independent expected labels (see `docs/technical-spikes.md`). Not production code.
 - `tests/fixtures/`: conventions for future synthetic fixtures and independent labels.
 - `pyproject.toml`: package metadata and pinned direct development dependencies.
 
@@ -145,7 +148,7 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 - [Domain model](docs/domain-model.md): technology-neutral concepts and invariants.
 - [UX specification](docs/ux-spec.md): workflows, states and review route.
 - [Technology options](docs/technology-options.md): five options, ordinal matrix and provisional recommendation with primary references.
-- [Technical spikes](docs/technical-spikes.md): bounded proposals, not executed experiments.
+- [Technical spikes](docs/technical-spikes.md): S1/S2 executed with recorded evidence; S3/S6 and persistence validation still planned.
 - [Delivery roadmap](docs/delivery-roadmap.md): technology-neutral milestones.
 - [Prototype verification](docs/prototype-verification.md): observed checks and limitations.
 
@@ -156,6 +159,8 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 ## Review gate
 
 The owner selected Python + PySide6 / Qt Widgets and approved the shared
-development, CI, and Windows packaging foundation. Technical-spike evidence is
-still pending for document ingestion, matching, storage, and real Windows
-no-admin/offline deployment. See the implementation plan for subsequent slices.
+development, CI, and Windows packaging foundation. The S1/S2 document-ingestion
+spike has been executed (macOS; python-docx 1.2.0 + focused OOXML access
+selected — see the technical-spike evidence). Matching (S6), storage, and real
+Windows no-admin/offline deployment evidence are still pending. See the
+implementation plan for subsequent slices.

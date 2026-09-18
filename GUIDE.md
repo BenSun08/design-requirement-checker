@@ -311,8 +311,7 @@ button = QPushButton("导入 DOCX")
 You want this Python function to run when it is clicked:
 
 ```python
-def import_docx():
-    ...
+def import_docx(): ...
 ```
 
 Qt uses signals and slots:
