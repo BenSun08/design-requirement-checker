@@ -23,6 +23,23 @@ and the preview preserves whitespace (`white-space: pre-wrap`). Matching,
 baseline persistence, background execution and Windows validation remain
 future tasks.
 
+**2026-09-19 execution record:** Task 1 S6 (deterministic rules and scale
+validation) executed as a bounded spike on the macOS development machine — see
+[technical-spikes.md](technical-spikes.md). It established, with hand-labelled
+test evidence in isolated spike code (`tests/s6_probe.py`,
+`tests/test_spike_s6_rules.py`, `tests/test_spike_s6_scale.py`): the exact
+normalization allowlist (N1–N3 approved, R1–R7 explicitly rejected), raw ↔
+normalized offset mapping, the forward-only requirement-span association rule
+with explicit uncertainty reasons (`requirement-span-association-uncertain`,
+`no-associated-requirement-content`), strike evaluation over the requirement
+span, the confirmed truth table (CONFIGURED / STRUCK_OUT / MISSING / UNRESOLVED
+with status unset), repeated/conflicting evidence behavior, description
+comparison as an independent dimension, verification-level vs
+configuration-level ambiguity, scale viability (3,000 blocks × 100 items ≈
+1.1 s; ≈ 0.13 MB transient peak), per-(CheckItem, block) cancellation
+checkpoints and determinism. No production matching code was written;
+`matching.py` remains a placeholder and Task 3 stays a separate pending slice.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
@@ -90,7 +107,7 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 - [ ] Prepare normal/table/mixed-run/full/partial/inherited-strike and contradictory-evidence fixtures, plus sanitized representative samples.
 - [x] Run S1/S2 to select the Python DOCX access strategy and establish source/coverage behavior. Executed 2026-09-18 on the macOS development machine with synthetic fixtures and independent labels; evidence and limitations recorded in [technical-spikes.md](technical-spikes.md). Selected: python-docx 1.2.0 + focused OOXML/XML access; unknown formatting preserved; merged-cell/tracked-revision/excluded-structure hazards made explicit. Windows/S3 and real-document evidence remain open.
 - [ ] Run S3 on both Windows target families as a standard user; test portable distribution first and record policy restrictions.
-- [ ] Run S6 for transformation allowlist, specific detection phrases, requirement-span association and performance/cancellation limits.
+- [x] Run S6 for transformation allowlist, specific detection phrases, requirement-span association and performance/cancellation limits. Executed 2026-09-19 on the macOS development machine with synthetic fixtures and independent labels; evidence in [technical-spikes.md](technical-spikes.md): exact normalization allowlist (N1–N3 approved, R1–R7 rejected with negative tests), raw ↔ normalized offset mapping, forward-only requirement-span association with explicit uncertainty reasons, strike truth table over requirement spans, conflict/ambiguity behavior, comparison independence, scale viability (3,000 blocks / 100 items ≈ 1.1 s), per-(item, block) cancellation checkpoints and determinism, plus composition with real Task 2 ingestion output. Windows/S3 and real-document evidence remain open.
 - [ ] Validate one-baseline storage/recovery and choose a user-writable path/format.
 - [ ] Record versions, failures, unsupported features and next bounded slice. Do not claim a passed probe from documentation review.
 
@@ -187,7 +204,7 @@ A slice is complete only when its acceptance evidence exists, failures and scope
 
 ## Next authorized decision
 
-This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. The next proposed work package is Task 3 (deterministic verification), pending explicit execution authorization. The remaining Task 1 probes (S3, S6, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
+This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. S6 of Task 1 (deterministic rules and scale validation) was executed 2026-09-19 with recorded evidence: the deterministic rules Task 3 needs are established without inventing product policy. The next proposed work package is Task 3 (deterministic verification), pending explicit execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 

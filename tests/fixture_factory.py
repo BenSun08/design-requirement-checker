@@ -348,6 +348,26 @@ def build_ole_container(path: Path) -> Path:
     return path
 
 
+def build_requirement_strike(path: Path) -> Path:
+    """S6 composition fixture: three requirement sentences, one per strike row.
+
+    p0 fully active (CONFIGURED row), p1 with only the value part struck
+    (partial-strike row), p2 fully struck (STRUCK_OUT row). Detection phrases
+    differ per paragraph so each S6 item matches exactly one paragraph.
+    """
+    doc = Document()
+    doc.add_paragraph("A功能增加延时3s")
+    p1 = doc.add_paragraph()
+    p1.add_run("B功能增加延时")
+    struck = p1.add_run("3s")
+    struck.font.strike = True
+    p2 = doc.add_paragraph("C功能增加延时2s")
+    for run in p2.runs:
+        run.font.strike = True
+    doc.save(path)
+    return path
+
+
 def build_empty(path: Path) -> Path:
     """A valid document with no paragraphs and no tables."""
     doc = Document()
