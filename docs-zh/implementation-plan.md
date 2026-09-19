@@ -7,6 +7,18 @@
 本次未完成下文 Task 1 技术验证或 Task 2 真实 DOCX 纵向切片；下文关于源码尚未
 创建的描述属于初始化之前的规划状态。
 
+**2026-09-18 执行记录：** Task 1 的 S1/S2 实验已执行（macOS、合成夹具），
+见 [technical-spikes.md](../docs/technical-spikes.md)。Task 2 首个 DOCX 纵向切片
+已于同日执行：领域值模型、经 S1/S2 验证的 python-docx 1.2.0 ＋针对性 OOXML
+适配器、导入协调与最小 Qt 文档视图，测试先行。同日修复切片修复了评审发现的
+摄取／覆盖缺陷：提取超链接包裹的 run（此前静默丢失）、检测首页／偶数页页眉
+页脚变体及仅含表格的页眉／页脚内容、已知不支持结构（域代码、脚注／尾注引用、
+`w:altChunk`、智能标记、嵌套超链接）强制 LIMITED 而非静默 COMPLETE、默认段落
+样式从 `w:default="1"` 标记解析而非假定 "Normal" id、读取失败带独立类别
+（file-access-error / invalid-or-unreadable-document / unexpected-parser-error），
+且预览保留空白（`white-space: pre-wrap`）。匹配、基准持久化、后台执行与
+Windows 验证仍属后续任务。
+
 [English source](../docs/implementation-plan.md)
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。
@@ -73,7 +85,7 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 - [ ] 确定获准的开发／构建环境，保留公司 Python 3.8；记录是否允许隔离的新解释器，在安装前验证候选依赖兼容性。
 - [ ] 准备正常／表格／混合 run／全文／部分／继承删除线／冲突夹具及脱敏样本。
-- [ ] 执行 S1/S2，确定 Python DOCX 访问方式和来源／覆盖行为。
+- [x] 执行 S1/S2，确定 Python DOCX 访问方式和来源／覆盖行为。已于 2026-09-18 在 macOS 开发机上用合成夹具和独立标签执行；证据与限制记录于 [technical-spikes.md](../docs/technical-spikes.md)。选定 python-docx 1.2.0 ＋ 针对性 OOXML/XML 访问；保留未知格式；合并单元格／修订／排除结构的风险已显式化。Windows/S3 与真实文档证据仍待补。
 - [ ] 在两类 Windows 上以普通用户执行 S3，优先便携分发并记录策略限制。
 - [ ] 执行 S6，验证转换白名单、具体短语、要求范围、性能／取消限制。
 - [ ] 验证单基准存储／恢复，选择用户可写位置／格式。
@@ -87,12 +99,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 **输入：**本地文件选择、不可变字节。**输出：**带段落块、原始 run／有效删除线、快照稳定位置和范围提示的 Document，或明确失败。
 
-- [ ] 编写段落文本、表格／单元格来源、拆分 run、样式继承及不支持／受保护／损坏文件断言。
-- [ ] 实现前证明缺失／错误行为导致测试失败。
-- [ ] 在已确认范围内实现最小提取及领域校验，不跨段落／单元格匹配。
-- [ ] 最小 Qt Widgets 窗口显示文件名、块与格式，解析留在 widgets 外。
-- [ ] 检查原件不变、位置可重现、LIMITED／失败区别于成功空内容。
-- [ ] 执行针对性及已配置全项目检查，审查有限 diff，更新限制。
+- [x] 编写段落文本、表格／单元格来源、拆分 run、样式继承及不支持／损坏文件断言。2026-09-18 完成于 tests/test_domain.py、tests/test_docx_adapter.py、tests/test_application.py 与 tests/test_ui.py，期望标签手写并复用实验夹具工厂。修复（同日）新增夹具：超链接包裹的 run、页眉／页脚变体（含仅表格内容）、自定义默认段落样式、不支持结构（域代码、脚注／尾注引用、`w:altChunk`、智能标记）及密码保护文档的 OLE 复合文件容器。加密／密码保护 DOCX 的处理在该容器格式失败路径之外仍未验证——见剩余验证事项。
+- [x] 实现前证明缺失／错误行为导致测试失败。四个新测试模块在实现前均收集失败（ImportError），见 Task 2 运行记录。
+- [x] 在已确认范围内实现最小提取及领域校验，不跨段落／单元格匹配。domain.py（带校验的值模型）、docx_adapter.py（由已验证的实验探测移植的 python-docx 1.2.0 ＋针对性 OOXML/XML 访问）、application.py（import_document → Document 或 ImportFailure）。
+- [x] 最小 Qt Widgets 窗口显示文件名、块与格式，解析留在 widgets 外。ui/main_window.py 渲染文件名、覆盖警告与带删除线标记的文本块；仅调用应用层用例（导入延迟到首次使用，启动组装不加载文档适配器）。
+- [x] 检查原件不变、位置可重现、LIMITED／失败区别于成功空内容。由 test_docx_adapter（前后 sha256、重复读取稳定性）与 test_ui（LIMITED 警告、显式失败、空文档可区分）断言。
+- [x] 执行针对性及已配置全项目检查，审查有限 diff，更新限制。87 项测试通过；ruff check、ruff format --check、mypy（strict）、pip check、git diff --check 全部通过。已知限制：导入期间解析在 UI 线程执行（后台执行属任务 4）；Windows 与真实文档验证待补。修复重新运行全部检查：100 项测试通过，其余检查同样通过；Windows PyInstaller 工作流在修复切片中未触发，待手动运行。
 
 **验收：**真实输入→真实块→可见来源成立，暂不做匹配。未知格式不默认为正常；不支持内容不会无提示消失。
 
@@ -172,7 +184,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 ## 下一项授权决定
 
-本次关闭技术选择并记录规则。建议的下个工作包为任务 1，即有限 S1/S2/S3/S6 与持久化验证，等待明确执行授权及所需 Windows／样本访问。不重新开放技术栈，不自动开始生产脚手架。
+本次关闭技术选择并记录规则。任务 1 的 S1/S2 已执行并记录证据（2026-09-18，macOS；见
+[technical-spikes.md](../docs/technical-spikes.md)）；任务 2（首个 DOCX 垂直切片）已于
+同日经用户授权执行：在 macOS 开发机上"真实输入→真实块→可见来源"端到端成立。建议的
+下个工作包为任务 3（确定性核查），等待明确执行授权。任务 1 剩余实验（S3、S6、持久化
+验证）仍待执行，需各自的授权及 Windows／样本访问。不重新开放技术栈，不自动开始下一
+个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境
 

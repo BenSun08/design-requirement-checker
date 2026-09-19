@@ -2,7 +2,7 @@
 
 [简体中文版](../docs-zh/technical-spikes.md)
 
-Status: **PLANNED, NOT EXECUTED**. The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize executing probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
+Status: **S1/S2 EXECUTED 2026-09-18 on the macOS development machine — see "Executed evidence" below. S3, S6 and persistence validation remain PLANNED, NOT EXECUTED.** The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize further probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
 
 Development and CI use the same Python 3.13/PySide6 source on macOS and Windows.
 Production remains Windows 10/11 x64. Windows packages are built on Windows only;
@@ -23,6 +23,170 @@ Before S1/S2, record the available development/build interpreter, permissions, W
 | S4 Desktop/core IPC | Retired from the previous candidate comparison. Selected architecture has no sidecar or core server. | No work or protocol introduced. UI responsiveness remains S6/Qt validation. | 0 h. Reopen only after a new architectural decision. |
 | S5 Future DOCX preservation | Deferred advisory probe: open/save a copy, optionally modify one run; compare package parts and Word rendering. | Preservation/loss evidence for styles/tables/relationships, no lossless claim from text equality. Original unchanged. | 2–4 h only if later authorized; not a gate while editing remains outside MVP. |
 | S6 Deterministic rules and scale | Review detectionPhrase/aliases and associated requirement spans; test normalization allowlist, conflict and partial-strike rules, ambiguous similar phrases and representative file sizes. | Specific detection phrases establish intended function; broad related words do not. Numbers/units/negation retained. Single changed value → CONFIGURED + DIFFERENT; conflicting active values, mixed active/deleted, partial/unknown strike → UNRESOLVED. Empty expected description/unsupported comparison → NOT_COMPARED. Record memory/time and cancellation behavior. | 3–5 h initial probe. Complex cases become explicit unresolved outcomes, not hidden heuristics. |
+
+## Executed evidence — S1 and S2 (2026-09-18)
+
+Executed as one bounded slice on the macOS development machine only. No
+Windows runtime, clean-machine, packaged-runtime or real-customer-document
+evidence is claimed.
+
+Environment (recorded from the actual probe run):
+
+- OS: macOS 26.7 (x86_64); development platform only, not the production target.
+- Python 3.13.7; python-docx 1.2.0 (+ lxml 6.1.3); PySide6 6.11.2 installed but unused by the probe.
+- Probe code: `tests/docx_probe.py` — an exploratory adapter kept intentionally
+  isolated from the production placeholders in `src/`.
+- Fixtures: `tests/fixture_factory.py` builds nine deterministic synthetic
+  documents per test session (normal, table, nested-merged, strike-matrix,
+  docdefaults-strike, tracked-revisions, excluded-parts, empty, malformed),
+  with small documented raw-OOXML patches for cases python-docx cannot
+  generate (dstrike, invalid strike value, orphan rStyle, docDefaults strike,
+  w:ins/w:del, w:sdt, text box, hidden vMerge continuation text).
+- Expected labels are hand-written in `tests/test_spike_s1_oxml_fidelity.py`
+  and `tests/test_spike_s2_locations_coverage.py`, not copied from probe
+  output.
+
+### S1 — OOXML fidelity: observed results
+
+| Case (fixture) | Expected (independent label) | Observed | Outcome |
+|---|---|---|---|
+| Body paragraph text, split runs, adjacent same-format runs (normal) | exact texts; contiguous half-open code-point run offsets; empty paragraph is a zero-run block | matches | pass |
+| Direct strike true / explicit false (strike-matrix) | True/False from run rPr | `run.font.strike` returns the direct value | pass |
+| Partial strike, mixed runs (strike-matrix) | per-run False/True/False | matches | pass |
+| Style-inherited strike via basedOn (strike-matrix) | True, origin paragraph style | `run.font.strike` is None (style value invisible to the API); element-level chain resolution works | pass — needs focused XML |
+| Explicit-false override under inherited style strike (strike-matrix) | False, direct wins | matches | pass |
+| docDefaults strike (docdefaults-strike) | True via rPrDefault; explicit run false overrides | matches via element-level read of `w:docDefaults` | pass — needs focused XML |
+| Double strike `w:dstrike` (strike-matrix) | detectable; product classification open | `font.double_strike` is True; probe keeps effective strike unknown with `double-strike` reason | limited / open question |
+| Invalid `w:strike w:val="maybe"` (strike-matrix) | unknown, never false | python-docx raises `InvalidXmlError` on `font.strike`; probe classifies unknown | pass — unknown preserved |
+| Orphan `w:rStyle` reference (strike-matrix) | unknown | python-docx `run.style` silently falls back to "Default Paragraph Font"; probe detects the orphan reference itself and reports unknown | pass — API alone unsafe |
+| Tracked revisions `w:ins`/`w:del` (tracked-revisions) | separate/unsupported, explicit | `paragraph.runs`/`.text` silently omit ins/del content; probe marks the block LIMITED (`tracked-revisions-unsupported`) and excludes revision text | limited by design |
+| Malformed input (malformed) | explicit failure | `PackageNotFoundError`; coverage FAILED with error text, zero blocks | pass |
+| Valid empty document (empty) | COMPLETE, zero blocks, no error | matches; distinct from FAILED | pass |
+| Original bytes unchanged (all readable fixtures) | file hash identical before/after probe | matches | pass |
+
+### S2 — locations and coverage: observed results
+
+| Case (fixture) | Expected | Observed | Outcome |
+|---|---|---|---|
+| Body paragraph indices; table/cell paragraph indices; nested-table ancestor path (normal/table/nested-merged) | stable block ids (`body:pN`, `t0r1c1:table-cell:pN`, nested `t0r2c1>t0r0c0:table-cell:p0`), cell-local paragraph indices | matches; identical across re-probes | pass |
+| Multi-paragraph cell; no cross-paragraph/cell joins (table) | separate blocks | matches | pass |
+| Merged cells (nested-merged) | gridSpan/vMerge master extracted once at its master grid position | naive `Table.rows[i].cells` repeats merged cells (duplicate-extraction hazard confirmed); w:tc-level traversal extracts each master exactly once | pass — needs focused XML |
+| vMerge continuation with hidden text (nested-merged) | excluded but explicit | no block; coverage LIMITED `merged-cell-continuation-content-excluded` | pass |
+| Split-run reconstruction (all) | raw text equals concatenated run texts; contiguous half-open offsets | matches for every block | pass |
+| Conservative normalization + raw-span mapping (normal) | whitespace collapse only; normalized spans map back to exact raw offsets ("B C" → raw "B\tC" at [3,6)) | matches; collapsed whitespace runs map to whole raw runs | pass — allowlist finalization deferred to S6 |
+| Excluded structures (excluded-parts) | headers/footers, body-level `w:sdt` paragraphs and text-box text excluded with explicit LIMITED reasons | `doc.paragraphs` silently omits sdt/textbox content; probe reports `header-/footer-content-not-checked`, `content-control-content-excluded`, `textbox-content-excluded` | pass |
+| Duplicate prevention (all) | unique block ids; merged text appears once | matches | pass |
+| Coverage honesty (all) | COMPLETE only with zero reasons; LIMITED with reasons; FAILED distinct from valid-empty | matches | pass |
+
+### Findings that shape Task 2
+
+1. **Selected adapter strategy: python-docx 1.2.0 + focused OOXML/XML access**
+   (lxml via python-docx). It is sufficient for the declared MVP scope:
+   body/table/cell paragraphs, runs with code-point offsets, effective strike
+   with unknown preservation, stable locations, explicit coverage warnings.
+   The dependency is pinned in `pyproject.toml`.
+2. Three silent-loss hazards in the python-docx API must be compensated in the
+   production adapter: runs inside `w:ins`/`w:del` are omitted from
+   `paragraph.runs`/`.text`; merged cells are duplicated by `row.cells`;
+   body-level `w:sdt` and text-box content are invisible to `doc.paragraphs`.
+   The probe compensates through element-level traversal plus explicit LIMITED
+   reasons; the production adapter must do the same.
+3. Effective strike cannot come from `run.font.strike` alone (direct value
+   only; style/docDefaults values invisible; orphan rStyle silently falls back
+   to the default character style). Chain resolution run rPr → character style
+   chain → paragraph style chain → docDefaults → default-off is required, with
+   unknown preserved for invalid values, orphan/broken chains and double strike.
+4. Every unknown strike value in probe output carries an explicit reason
+   (asserted by test); unknown is never converted to false.
+
+### Task 2 remediation — ingestion/coverage evidence (2026-09-18)
+
+Executed as a bounded remediation of the Task 2 slice on the same macOS
+development environment (python-docx 1.2.0, lxml 6.1.3, PySide6 6.11.2,
+Python 3.13.7). All observations below are covered by hand-labelled
+regression fixtures in `tests/fixture_factory.py` and tests in
+`tests/test_docx_adapter.py`, `tests/test_application.py`,
+`tests/test_ui.py`.
+
+- **Hyperlink-wrapped runs are extracted.** Observed: `paragraph.runs` omits
+  runs inside `w:hyperlink` (python-docx 1.2.0's `paragraph.text` includes
+  them, but the Task 2 adapter reconstructed block text from `paragraph.runs`,
+  so "Prefix [hyperlink text] suffix" lost its middle run and its strike).
+  `Paragraph.iter_inner_content()` yields Run|Hyperlink in document order and
+  `Hyperlink.runs` preserves text and direct strike, so the adapter now
+  extracts hyperlink runs with contiguous offsets and resolved strike; the
+  link URL itself is never document text. A hyperlink nested inside another
+  hyperlink (invalid OOXML) stays invisible to every run accessor and produces
+  `nested-hyperlink-content-excluded` instead of silent loss.
+- **Header/footer variants are detected.** Observed: first-page and even-page
+  headers/footers (`w:titlePg`, odd-and-even settings) and table-only
+  header/footer content were previously missed. All six variants are now
+  checked for paragraph and table content; each side keeps one stable token
+  (`header-content-not-checked` / `footer-content-not-checked`) across all
+  variants, and the content never enters body blocks. Reading `.paragraphs`
+  of a linked-to-previous container creates a header part in the in-memory
+  package, so the adapter checks `is_linked_to_previous` before any content
+  access.
+- **Known unsupported structures force LIMITED.** Observed silent losses in
+  `paragraph.runs`: `w:fldSimple` cached-result runs and `w:smartTag`-wrapped
+  runs. Complex-field runs (`w:fldChar`/`w:instrText`) produce empty-text runs
+  whose field result (a direct paragraph child) stays extracted. The adapter
+  now detects `w:instrText`, `w:fldSimple`, `w:footnoteReference`,
+  `w:endnoteReference`, `w:smartTag` and body-level `w:altChunk` with stable
+  tokens (`field-code-content-excluded`, `footnote-or-endnote-content-excluded`,
+  `smart-tag-content-excluded`, `alt-chunk-content-excluded`); none of them
+  can yield a silent COMPLETE result. No field evaluation, footnote or
+  altChunk extraction is attempted.
+- **Default paragraph style resolved from the marker, not the id.** The
+  default paragraph style is the `w:style` with `w:type="paragraph"` and
+  `w:default="1"` (the shipped template marks "Normal"; a fixture with
+  `CorpBody` as the default id resolves inherited strike correctly). If the
+  marker is absent or ambiguous, no default style is fabricated and the chain
+  falls back to docDefaults.
+- **Read-failure categories.** `file-access-error` (OSError while reading),
+  `invalid-or-unreadable-document` (BadZipFile, missing package parts,
+  invalid XML — including the OLE compound-file container Word produces for
+  password-protected documents, exercised by the deterministic
+  `build_ole_container` fixture), and `unexpected-parser-error` (an injected
+  collection bug is reported under its own category and never mislabelled as
+  an invalid document). The broad `except Exception` around strike parsing was
+  removed: `w:strike`/`w:dstrike` are read element-level, classifying invalid
+  ST_OnOff values as unknown-with-reason without catching programmer errors.
+- **Preview whitespace.** Qt's rich-text engine collapses runs of spaces in
+  plain `<p>` elements ("A  B\tC" renders as "A B C"); run paragraphs now use
+  `white-space: pre-wrap`, verified by a QTextDocument round-trip test. The
+  domain text is unchanged.
+- **Windows build.** Source-level CI (macOS + Windows, Python 3.13) covers the
+  remediation commit; the manually triggered PyInstaller workflow
+  (`build-windows.yml`) was **not run** for this slice and remains pending
+  (see the implementation plan). This is not S3 evidence.
+
+### Not probed / remaining limitations
+
+- Table-style character formatting, linked styles, `w:rPrChange` tracked
+  formatting, hidden text (`w:vanish`), comments, block-level `w:customXml`,
+  oversized documents.
+- Encrypted/password-protected DOCX: only the OLE container-format failure
+  path is exercised (explicit import failure). No decryption exists and no
+  real Office-produced encrypted files were validated.
+- Only synthetic fixtures on macOS; no sanitized real customer documents, no
+  Windows execution beyond CI. CI runs the same tests on windows-latest,
+  which is still not S3 deployment evidence.
+- The normalization allowlist is deliberately minimal (whitespace collapse);
+  punctuation/width mappings remain an S6 output.
+- Effort: S1/S2 executed within a single bounded session, inside the combined
+  S1+S2 timebox guidance; the remediation was a second bounded session.
+
+### Unresolved questions
+
+- Product meaning of `w:dstrike`: should double strike count as deletion
+  formatting (struck) or remain a distinct unknown? The probe reports unknown.
+- Should text inside `w:ins` (tracked insertion) be included in extracted
+  block text? Currently excluded with a LIMITED reason.
+
+**Task 2 status: unblocked.** The document access strategy is established with
+evidence; Task 2 (first DOCX vertical slice) can be implemented on this basis,
+pending explicit authorization.
 
 ## Persistence validation inside the selected stack
 
