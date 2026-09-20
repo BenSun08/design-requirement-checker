@@ -2,7 +2,7 @@
 
 [简体中文版](../docs-zh/technical-spikes.md)
 
-Status: **S1/S2 EXECUTED 2026-09-18 on the macOS development machine — see "Executed evidence" below. S3, S6 and persistence validation remain PLANNED, NOT EXECUTED.** The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize further probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
+Status: **S1/S2 EXECUTED 2026-09-18 and S6 EXECUTED 2026-09-19 on the macOS development machine — see "Executed evidence" below. S3 and persistence validation remain PLANNED, NOT EXECUTED.** The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize further probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
 
 Development and CI use the same Python 3.13/PySide6 source on macOS and Windows.
 Production remains Windows 10/11 x64. Windows packages are built on Windows only;
@@ -187,6 +187,243 @@ regression fixtures in `tests/fixture_factory.py` and tests in
 **Task 2 status: unblocked.** The document access strategy is established with
 evidence; Task 2 (first DOCX vertical slice) can be implemented on this basis,
 pending explicit authorization.
+
+## Executed evidence — S6 deterministic rules and scale (2026-09-19)
+
+Executed as one bounded slice on the macOS development machine, on top of the
+remediated Task 2 ingestion layer. No production matching code was written;
+`src/design_requirement_checker/matching.py` remains a placeholder. All
+evidence comes from the isolated spike probe `tests/s6_probe.py` validated
+against hand-written independent labels in `tests/test_spike_s6_rules.py` and
+`tests/test_spike_s6_scale.py`, plus one synthetic DOCX composition fixture
+(`build_requirement_strike` in `tests/fixture_factory.py`) that runs the rules
+over real ingestion output. Expected labels were written before the probe logic
+(red state confirmed: both test modules failed on collection before
+`s6_probe.py` existed).
+
+### Environment
+
+- OS: macOS 26.7 (x86_64); development platform only, not the production target.
+- Python 3.13.7; python-docx 1.2.0 (+ lxml 6.1.3); pytest 9.1.1.
+- Windows: GitHub CI (windows-latest) runs the same tests, which is not S3
+  deployment evidence.
+
+### Exact normalization allowlist (validated)
+
+Applied per block; blocks are never joined. Approved transformations:
+
+| ID | Transformation | Exact mapping |
+|---|---|---|
+| N1 | whitespace-run collapse | any run of ASCII space, tab and U+3000 ideographic space → one ASCII space |
+| N2 | within-block line breaks | any run of `\n` `\r` `\v` `\f` → one ASCII space |
+| N3 | fullwidth ASCII punctuation → ASCII | `（→(` `）→)` `：→:` `；→;` `，→,` `？→?` `！→!` `．→.` |
+
+Everything else is preserved verbatim: digits, units, letter case, negation
+words, comparison operators, ideographic punctuation. Rejected transformations
+(each covered by an explicit negative test):
+
+| ID | Tempting transformation | Rejected because |
+|---|---|---|
+| R1 | `。` → `.` | ideographic full stop is never rewritten; it is only recognized as a span boundary |
+| R2 | fullwidth digits/letters → ASCII (`２s`→`2s`, `ＣＡＮ１`→`CAN1`) | width conversion would silently equate distinct engineering text |
+| R3 | case-insensitive matching (`CAN` ≡ `can`) | no evidence that case differences are insignificant |
+| R4 | NFKC-style Unicode normalization | folds width/compatibility distinctions wholesale |
+| R5 | numeric/unit equivalence (`2s`≡`3s`, `24V`≡`12V`, decimal rounding) | engineering values must stay distinguishable |
+| R6 | negation/antonym/operator folding (`开启`≡`不开启`, `允许`≡`禁止`, `>5km/h`≡`<5km/h`) | polarity and comparison direction are engineering meaning |
+| R7 | general punctuation stripping | destroys the structure needed for span association |
+
+Meaning-preservation assertions: none of `2s`/`3s`, `24V`/`12V`, `开启`/`不开启`,
+`允许`/`禁止`, `>5km/h`/`<5km/h`, `CAN1`/`CAN2`, `２s`/`2s`, `CAN`/`can` become
+equal under the allowlist.
+
+### Raw ↔ normalized offset mapping
+
+Every normalized character carries its raw source span
+(`NormalizedText.char_sources`). Validated invariants: spans are monotonic,
+non-overlapping and cover every raw code point exactly once; a normalized match
+maps to the exact raw span; a collapsed whitespace run maps to the whole raw
+run (`"A  B"` → `"A B"`, normalized [0,3) → raw (0,4)). Combinations tested:
+multiple spaces, tabs, ideographic spaces, line breaks within a block,
+fullwidth punctuation, Chinese and ASCII text. Normalization never destroys
+traceability and the stored source text itself stays raw.
+
+### Requirement-span association rule (the rule Task 3 must implement)
+
+For each qualifying occurrence (normalized match span [s, e) inside one block):
+
+1. The requirement span starts at `s` and extends **forward only**.
+2. It ends at the earliest of: the next boundary delimiter — one of
+   `;.!? ,、。` in normalized text, where `.`/`,` between digits are not
+   boundaries (`2.5s`, `1,000ms` stay intact) — or the start of the next
+   qualifying match in the same block, or the end of the block.
+3. No backward extension: text before the match (e.g. a preceding value) is
+   never associated.
+
+Observed on the confirmed example
+`2门控制增加开关门延时3s功能；1门控制增加开关门延时5s功能`: the first item
+associates raw span (0,15) with value `3s`, the second (16,31) with `5s`; the
+`5s` never leaks into the first item's evidence.
+
+Unsafe associations are never guessed. The occurrence keeps its span but is
+blocked from comparison with an explicit reason:
+
+- `requirement-span-association-uncertain` — the span carries no value token
+  while the expected description does, and the remainder of the enclosing
+  sentence contains a value (e.g. `…，延时时间为3s。`, `…，周期10ms，延时3s。`).
+  The value may or may not belong to this function, so neither seizing it nor
+  comparing is safe. Observed outcome: CONFIGURED + NOT_COMPARED.
+- `no-associated-requirement-content` — the span never extended past the
+  matched phrase while the expected description differs from the bare phrase
+  (phrase at paragraph end, or value preceding the phrase). Observed outcome:
+  CONFIGURED + NOT_COMPARED.
+
+Value tokens (number + unit from a fixed unit list, tolerating one collapsed
+space between number and unit) are used **only** to detect conflicting key
+parameters between occurrences of the same item; they never replace text in
+comparisons.
+
+### Strike evaluation (over the requirement span)
+
+Strike coverage is computed over the raw requirement span by intersecting it
+with run formatting supplied by ingestion (`TextRun.effective_strike`): NONE
+(all active), FULL (all struck), PARTIAL (mixed true/false), UNKNOWN (any
+unknown). Struck text elsewhere in the paragraph is irrelevant (validated).
+"Does any run in the paragraph have strike" is explicitly insufficient.
+
+### Truth table (observed)
+
+| Evidence | Resolution | Status | Comparison |
+|---|---|---|---|
+| consistent qualifying active evidence | RESOLVED | CONFIGURED | SAME / DIFFERENT / NOT_COMPARED |
+| all qualifying evidence fully struck | RESOLVED | STRUCK_OUT | NOT_COMPARED (`evidence-struck`) |
+| no qualifying evidence in checked scope | RESOLVED | MISSING | NOT_COMPARED (`nothing-to-compare`) |
+| partial strike | UNRESOLVED | unset | NOT_COMPARED |
+| unknown formatting | UNRESOLVED | unset | NOT_COMPARED |
+| active + struck coexist | UNRESOLVED | unset | NOT_COMPARED |
+| conflicting active key values (`2s` vs `3s`) | UNRESOLVED | unset | NOT_COMPARED |
+| ambiguous function identity | UNRESOLVED | unset | NOT_COMPARED |
+
+No fourth CheckStatus exists; UNRESOLVED is a resolution state with status
+unset. All occurrences are retained and inspectable in every case — no
+"last occurrence wins", no "active always wins".
+
+### Description comparison (independent dimension)
+
+- SAME: every comparable active occurrence's normalized requirement text
+  equals the normalized expected description.
+- DIFFERENT: no comparable active occurrence equals it. The confirmed example
+  (expected `…2s功能`, actual `…3s功能`) is CONFIGURED + DIFFERENT, never
+  MISSING, because function identity is safely established by the exact
+  detection phrase.
+- NOT_COMPARED with an explicit reason: expected description empty
+  (`expected-description-empty`); alias-only hit — an alias establishes
+  function identity only and never implies description equality, comparison
+  still requires text equality; uncertain association (the two reasons above);
+  mixed comparable occurrences (`mixed-comparison-occurrences`); MISSING
+  (`nothing-to-compare`); STRUCK_OUT (`evidence-struck`); UNRESOLVED
+  (`result-unresolved`).
+
+Detection, resolution and description comparison are independent dimensions:
+one block with one occurrence produced CONFIGURED + NOT_COMPARED / SAME /
+DIFFERENT for three items differing only in `expectedDescription`. The spike
+result model has no score/confidence/similarity field (asserted by test).
+
+### Ambiguous function identity
+
+- Overlapping match spans claimed by **different term texts** across items
+  (broad `门控制延时` vs specific `2门控制延时`): both occurrences are flagged
+  ambiguous → UNRESOLVED unless clean evidence exists elsewhere (validated:
+  an item with one ambiguous and one clean occurrence resolves CONFIGURED and
+  keeps both occurrences with their flags).
+- **Identical term text** configured on multiple items: the text genuinely
+  contains the phrase for each item — no textual interpretation ambiguity — so
+  verification resolves each item normally; the duplicate configuration itself
+  is a baseline-validation (Task 5) defect to flag at checklist load/edit time.
+  This distinction (verification-level vs configuration-level ambiguity) is a
+  recorded S6 decision.
+
+### Repeated evidence
+
+- The same qualifying active requirement twice with equal value tokens and
+  equal text → CONFIGURED + SAME; both occurrences retained and inspectable.
+- A bare mention (no requirement content) plus a valued occurrence →
+  CONFIGURED, comparison decided by the comparable occurrence; the blocked
+  occurrence stays inspectable with its reason.
+- A `2s` occurrence plus a `3s` occurrence for the same function →
+  conflicting active key values → UNRESOLVED; neither is dropped or chosen.
+
+### Scale results (measured on the development machine)
+
+Synthetic documents built by `generate_scale_document` (filler paragraphs
+approximating engineering prose plus two embedded requirement clauses per
+item, hits and classifications known by construction):
+
+| Size | Blocks | Characters | Items | Occurrences | Wall-clock |
+|---|---|---|---|---|---|
+| small | 200 | 11,100 | 20 | 40 | 0.019 s |
+| medium | 800 | 43,940 | 60 | 120 | 0.185 s |
+| large | 3,000 | 161,580 | 100 | 200 | 1.087 s |
+
+- Peak transient allocation during `verify()` on the large fixture
+  (tracemalloc; the fixture itself was allocated before tracing started):
+  133,630 bytes ≈ 0.13 MB.
+- These are viability observations with sanity bounds, not performance
+  requirements; no production benchmark framework was built and none is implied
+  by the spec.
+- Conclusion: the simple deterministic approach (per-block normalization +
+  substring search) is obviously viable at representative scale.
+
+### Cancellation checkpoints
+
+`verify(items, blocks, cancel_check=...)` evaluates the cancellation flag once
+per (item, block) pair — `blocks_n × items_n` checkpoints — before collecting
+that pair's evidence. A True flag raises `SpikeCancelled` immediately; no
+partial result list is returned, so a cancelled run can never masquerade as a
+completed one (validated: a flag turning True after five checkpoints stops at
+the sixth). Recommended granularity for Task 3/Task 4: **per (CheckItem,
+block)** — fine enough for responsive cancellation at the measured speeds,
+coarse enough to add no measurable overhead. No threading, HTTP worker,
+multiprocessing or service was introduced in this slice.
+
+### Determinism
+
+Repeated identical inputs produce equal results (dataclass equality across two
+full medium-size runs). Occurrences are kept in stable source order (block
+index, then raw match span); no set/dict iteration order is visible in
+candidate, match or evidence ordering.
+
+### Composition with real ingestion
+
+One synthetic DOCX (`build_requirement_strike`: an active requirement with a
+changed value, a partial-strike requirement and a fully struck requirement) was
+read by the production Task 2 adapter (`read_document`, COMPLETE coverage) and
+verified by the spike rules: CONFIGURED + DIFFERENT / UNRESOLVED
+(partial-strike) / STRUCK_OUT observed exactly as labelled. The ingestion layer
+needed no changes for S6.
+
+### Remaining limitations
+
+- All fixtures are synthetic (Chinese/ASCII mixed); no sanitized real customer
+  documents were validated.
+- macOS development machine only; Windows evidence is CI-only, which is not S3.
+- The value-token unit list is fixed and small; tokens feed conflict detection
+  only, never comparison. Extending the list is a Task 3 data decision, not a
+  rule change.
+- Clause association is forward-only and boundary-based within one block;
+  requirements stated in a different block (e.g. a following table cell) are
+  never associated (blocks are not joined) — such cases surface as
+  `no-associated-requirement-content` / NOT_COMPARED rather than guesses.
+- The scale probe uses synthetic prose, not real document corpus sizes; the
+  numbers are viability evidence only.
+- Ambiguity detection is span-overlap based; semantic near-duplicates that do
+  not overlap textually are intentionally out of scope (no fuzzy matching).
+
+**Task 3 status: unblocked by S6 evidence.** Exact detection semantics, the
+normalization allowlist, raw-span traceability, the bounded requirement-span
+rule, uncertainty reasons, the strike truth table, conflict and ambiguity
+behavior, comparison independence, scale viability, cancellation granularity
+and determinism are established above. Task 3 remains its own slice, pending
+explicit authorization; this spike does not implement it.
 
 ## Persistence validation inside the selected stack
 
