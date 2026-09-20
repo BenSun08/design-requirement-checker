@@ -9,10 +9,19 @@ import pytest
 
 from design_requirement_checker.domain import (
     BlockType,
+    CheckItem,
+    CheckItemAlias,
+    CheckResult,
+    CheckStatus,
+    ComparisonState,
     Coverage,
     Document,
     DocumentBlock,
     DocumentLocation,
+    MatchEvidence,
+    MatchType,
+    Resolution,
+    StrikeCoverage,
     TableCellCoordinates,
     TextRun,
 )
@@ -284,3 +293,175 @@ class TestDocument:
         )
         assert document.coverage is Coverage.LIMITED
         assert document.warnings == ("tracked-revisions-unsupported",)
+
+
+def make_alias(text: str, alias_id: str = "alias-1") -> CheckItemAlias:
+    return CheckItemAlias(alias_id=alias_id, text=text)
+
+
+def make_check_item(
+    item_id: str = "dr-006",
+    *,
+    detection_phrase: str = "2门控制增加开关门延时",
+    enabled: bool = True,
+) -> CheckItem:
+    return CheckItem(
+        item_id=item_id,
+        code=item_id.upper(),
+        name="2门控制延时",
+        detection_phrase=detection_phrase,
+        expected_description="2门控制增加开关门延时2s功能",
+        aliases=(make_alias("两门延时功能"),),
+        enabled=enabled,
+    )
+
+
+def make_evidence(block_id: str = "body:p0") -> MatchEvidence:
+    location = DocumentLocation(
+        document_id="d1",
+        block_id=block_id,
+        block_type=BlockType.PARAGRAPH,
+        part="body",
+        paragraph_index=0,
+    )
+    return MatchEvidence(
+        evidence_id=f"{block_id}:e0",
+        document_id="d1",
+        block_id=block_id,
+        location=location,
+        raw_text="2门控制增加开关门延时3s功能",
+        matched_span=(0, 11),
+        requirement_span=(0, 15),
+        requirement_text="2门控制增加开关门延时3s功能",
+        matched_term="2门控制增加开关门延时",
+        match_type=MatchType.EXACT,
+        transformations=(),
+        strike_coverage=StrikeCoverage.NONE,
+    )
+
+
+def make_result(
+    resolution: Resolution,
+    status: CheckStatus | None,
+    *,
+    evidence: tuple[MatchEvidence, ...] = (),
+    comparison_state: ComparisonState = ComparisonState.NOT_COMPARED,
+    comparison_reason: str = "nothing-to-compare",
+) -> CheckResult:
+    return CheckResult(
+        check_item=make_check_item(),
+        document_id="d1",
+        resolution=resolution,
+        status=status,
+        evidence=evidence,
+        comparison_state=comparison_state,
+        comparison_reason=comparison_reason,
+        review_reasons=(),
+        rule_revision="task3-v1",
+    )
+
+
+class TestCheckItem:
+    def test_required_fields_must_be_present(self) -> None:
+        with pytest.raises(ValueError, match="required"):
+            CheckItem(
+                item_id="",
+                code="C",
+                name="n",
+                detection_phrase="p",
+                aliases=(),
+                enabled=True,
+            )
+        with pytest.raises(ValueError, match="required"):
+            CheckItem(
+                item_id="i",
+                code="",
+                name="n",
+                detection_phrase="p",
+                aliases=(),
+                enabled=True,
+            )
+        with pytest.raises(ValueError, match="required"):
+            CheckItem(
+                item_id="i",
+                code="C",
+                name="",
+                detection_phrase="p",
+                aliases=(),
+                enabled=True,
+            )
+
+    def test_detection_phrase_is_required(self) -> None:
+        with pytest.raises(ValueError, match="detection"):
+            CheckItem(
+                item_id="i",
+                code="C",
+                name="n",
+                detection_phrase="",
+                aliases=(),
+                enabled=True,
+            )
+
+    def test_empty_expected_description_is_permitted(self) -> None:
+        item = CheckItem(
+            item_id="i",
+            code="C",
+            name="n",
+            detection_phrase="p",
+            expected_description="",
+            aliases=(),
+            enabled=True,
+        )
+        assert item.expected_description == ""
+
+    def test_alias_requires_text(self) -> None:
+        with pytest.raises(ValueError, match="text"):
+            CheckItemAlias(alias_id="a", text="")
+
+
+class TestCheckResultInvariant:
+    def test_resolved_requires_exactly_one_status(self) -> None:
+        result = make_result(Resolution.RESOLVED, CheckStatus.CONFIGURED)
+        assert result.status is CheckStatus.CONFIGURED
+
+    def test_resolved_without_status_is_invalid(self) -> None:
+        with pytest.raises(ValueError, match="status"):
+            make_result(Resolution.RESOLVED, None)
+
+    def test_unresolved_must_not_carry_a_status(self) -> None:
+        result = make_result(Resolution.UNRESOLVED, None)
+        assert result.status is None
+        with pytest.raises(ValueError, match="status"):
+            make_result(Resolution.UNRESOLVED, CheckStatus.CONFIGURED)
+
+    def test_no_score_confidence_or_similarity_field_exists(self) -> None:
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(CheckResult)}
+        assert not field_names & {"score", "confidence", "similarity"}
+        evidence_fields = {f.name for f in dataclasses.fields(MatchEvidence)}
+        assert not evidence_fields & {"confidence", "similarity"}
+
+    def test_evidence_requires_non_empty_spans(self) -> None:
+        location = DocumentLocation(
+            document_id="d1",
+            block_id="body:p0",
+            block_type=BlockType.PARAGRAPH,
+            part="body",
+            paragraph_index=0,
+        )
+        with pytest.raises(ValueError, match="span"):
+            MatchEvidence(
+                evidence_id="e0",
+                document_id="d1",
+                block_id="body:p0",
+                location=location,
+                raw_text="abc",
+                matched_span=(1, 1),
+                requirement_span=(0, 3),
+                requirement_text="abc",
+                matched_term="ab",
+                match_type=MatchType.EXACT,
+                transformations=(),
+                strike_coverage=StrikeCoverage.NONE,
+            )

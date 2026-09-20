@@ -40,6 +40,24 @@ configuration-level ambiguity, scale viability (3,000 blocks × 100 items ≈
 checkpoints and determinism. No production matching code was written;
 `matching.py` remains a placeholder and Task 3 stays a separate pending slice.
 
+**2026-09-20 execution record:** Task 3 (deterministic verification) executed
+as one bounded production slice. The production domain models (CheckItem,
+CheckItemAlias, CheckResult, CheckStatus, Resolution, ComparisonState,
+MatchType, StrikeCoverage, MatchEvidence) and the pure matching engine now
+implement exactly the validated S6 contract: the N1–N3 normalization allowlist
+with raw-offset traceability (R1–R7 rejected transformations kept as negative
+tests), exact/normalized/alias detection from configured phrases only,
+forward-only requirement-span association with the S6 uncertainty reasons,
+strike coverage over the requirement span, the confirmed truth table with
+UNRESOLVED keeping status unset, retained repeated/conflicting/ambiguous
+evidence, independent SAME/DIFFERENT/NOT_COMPARED comparison, per-(CheckItem,
+block) cancellation checkpoints and deterministic ordering. `application.py`
+exposes `verify_document` with an explicit completed/cancelled lifecycle; a
+cancelled run never yields a completed result set. 245 tests pass, including a
+synthetic-DOCX → ingestion → verification composition test; no fuzzy/semantic
+matching, no confidence scores, no fourth status, no Task 4 UI or Task 5
+persistence was pulled forward.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
@@ -134,14 +152,14 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Consumes:** Document snapshot plus enabled CheckItem snapshot/rule revision. **Produces:** one CheckResult per enabled item, with all evidence, resolution/status, comparison state and reasons; coverage remains run-level.
 
-- [ ] Add tests for exact detectionPhrase, conservative normalization, explicit aliases and original-offset mapping.
-- [ ] Add truth-table tests: consistent active→CONFIGURED; all qualifying occurrences fully struck→STRUCK_OUT; none in checked scope→MISSING; partial/unknown/mixed/conflicting/ambiguous→UNRESOLVED.
-- [ ] Test a specific delay phrase against 2s/3s, broad related phrase ambiguity, empty expected description and alias-without-description-equivalence.
-- [ ] Implement only the independently testable supported rules. Retain original text and every occurrence; match ranking does not discard conflicts.
-- [ ] Repeat verification with identical inputs/baseline/rules and compare normalized result data, excluding incidental run metadata.
-- [ ] Run focused and project checks; add regressions for discovered false matches.
+- [x] Add tests for exact detectionPhrase, conservative normalization, explicit aliases and original-offset mapping. tests/test_matching.py covers exact/absent/broad/neighbouring/name-only detection, the S6 N1/N2/N3 allowlist with raw-span mapping, the rejected transformations (R1–R7) as negative tests, and alias identity/evidence retention.
+- [x] Add truth-table tests: consistent active→CONFIGURED; all qualifying occurrences fully struck→STRUCK_OUT; none in checked scope→MISSING; partial/unknown/mixed/conflicting/ambiguous→UNRESOLVED. Parametrized truth-table test plus dedicated strike, conflict and ambiguity tests; UNRESOLVED keeps status unset (domain invariant enforced in CheckResult).
+- [x] Test a specific delay phrase against 2s/3s, broad related phrase ambiguity, empty expected description and alias-without-description-equivalence. The confirmed example resolves CONFIGURED + DIFFERENT (never MISSING); uncertain association yields NOT_COMPARED with the S6 reason tokens.
+- [x] Implement only the independently testable supported rules. Retain original text and every occurrence; match ranking does not discard conflicts. matching.py implements the S6 contract (normalization with offset map, forward-only requirement spans, span-level strike coverage, classification, independent comparison); every occurrence is retained in source order and ambiguous evidence is kept with flags.
+- [x] Repeat verification with identical inputs/baseline/rules and compare normalized result data, excluding incidental run metadata. Determinism tests assert equal results and stable source ordering across repeated runs at matching and application level.
+- [x] Run focused and project checks; add regressions for discovered false matches. 245 tests pass; ruff check, ruff format --check, mypy (strict), pip check and git diff --check all pass. Task 2 ingestion tests remain green; one composition test runs synthetic DOCX → read_document → verify_document.
 
-**Acceptance:** function detection, confidence and description comparison remain separate. No fuzzy or semantic fallback. Uncertain requirement association or unsupported comparison is visible; not presumed correct.
+**Acceptance:** function detection, confidence and description comparison remain separate. No fuzzy or semantic fallback. Uncertain requirement association or unsupported comparison is visible; not presumed correct. No confidence score exists anywhere in the result model (asserted by test). Cancellation is checked once per (CheckItem, block); a cancelled run returns an explicit CANCELLED outcome with no results, never a completed all-MISSING report. Disabled items produce no results. Rule revision `task3-v1` is carried on every CheckResult.
 
 ## Task 4 — Qt review workspace
 
@@ -204,7 +222,7 @@ A slice is complete only when its acceptance evidence exists, failures and scope
 
 ## Next authorized decision
 
-This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. S6 of Task 1 (deterministic rules and scale validation) was executed 2026-09-19 with recorded evidence: the deterministic rules Task 3 needs are established without inventing product policy. The next proposed work package is Task 3 (deterministic verification), pending explicit execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
+This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. S6 of Task 1 (deterministic rules and scale validation) was executed 2026-09-19 with recorded evidence: the deterministic rules Task 3 needs are established without inventing product policy. Task 3 (deterministic verification) was executed 2026-09-20 under owner authorization: the production matching engine implements exactly the validated S6 contract, with 245 passing tests including a real-ingestion composition test. The next proposed work package is Task 4 (Qt review workspace), pending explicit execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 
