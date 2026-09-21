@@ -439,6 +439,52 @@ class TestBackgroundVerification:
         window.close()
 
 
+class TestReviewWorkspaceShell:
+    def test_workspace_has_splitter_with_result_and_detail_panels(self, qapp) -> None:
+        from PySide6.QtWidgets import QListWidget, QSplitter, QTextBrowser
+
+        window = MainWindow(check_items=(_item(),))
+        splitter = window.findChild(QSplitter)
+        assert splitter is not None
+        assert window.findChild(QListWidget) is not None
+        assert window.findChild(QTextBrowser) is not None
+        window.close()
+
+    def test_summary_and_search_strip_present(self, qapp) -> None:
+        from PySide6.QtWidgets import QLineEdit
+
+        window = MainWindow(check_items=(_item(),))
+        assert window._summary_label is not None
+        assert isinstance(window._search_input, QLineEdit)
+        window.close()
+
+    def test_actions_remain_after_shell_rebuild(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        assert window._import_button.text() == "导入 DOCX"
+        assert window._run_button.text() == "开始核查"
+        assert window._cancel_button.text() == "取消核查"
+        assert window._manage_button.text() == "检查项管理"
+        window.close()
+
+    def test_document_still_renders_after_import(self, qapp, tmp_path) -> None:
+        document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
+        window = MainWindow(check_items=(_item("a", "plain"),))
+        window.set_document(document)
+        assert "normal.docx" in window._summary_label.text()
+        # The document blocks view still exists somewhere in the workspace.
+        from PySide6.QtWidgets import QTextBrowser
+
+        browsers = window.findChildren(QTextBrowser)
+        assert any(b.toHtml() for b in browsers)
+        window.close()
+
+    def test_startup_window_size_is_desktop_target(self, qapp) -> None:
+        window = MainWindow()
+        assert window.width() >= 1024
+        assert window.height() >= 600
+        window.close()
+
+
 class TestPureFormatting:
     def test_body_location_is_one_based(self) -> None:
         location = DocumentLocation(
@@ -508,7 +554,7 @@ class TestWindowDisplay:
         assert "normal.docx" in window._summary_label.text()
         assert "完全" in window._summary_label.text()
         assert "文本块：5" in window._summary_label.text()
-        assert "plain body paragraph one" in window._blocks_view.toPlainText()
+        assert "plain body paragraph one" in window._detail_view.toPlainText()
         assert window._warnings_label.isHidden() is True
         window.close()
 
@@ -531,7 +577,7 @@ class TestWindowDisplay:
         window.show_import_outcome(failure)
         assert "导入失败" in window._summary_label.text()
         assert "broken.docx" in window._summary_label.text()
-        assert "BadZipFile" in window._blocks_view.toPlainText()
+        assert "BadZipFile" in window._detail_view.toPlainText()
         assert window._warnings_label.isHidden() is True
         window.close()
 
@@ -541,5 +587,5 @@ class TestWindowDisplay:
         window.show_import_outcome(document)
         assert "导入失败" not in window._summary_label.text()
         assert "文本块：0" in window._summary_label.text()
-        assert "文档为空" in window._blocks_view.toPlainText()
+        assert "文档为空" in window._detail_view.toPlainText()
         window.close()

@@ -24,12 +24,14 @@ from PySide6.QtCore import QCoreApplication, QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFileDialog,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -112,8 +114,8 @@ class MainWindow(QMainWindow):
     def __init__(self, check_items: Sequence[CheckItem] = ()) -> None:
         super().__init__()
         self.setWindowTitle("设计需求核查工具")
-        self.resize(1100, 720)
-        self.setMinimumSize(760, 480)
+        self.resize(1440, 900)
+        self.setMinimumSize(1024, 600)
 
         self._check_items: tuple[CheckItem, ...] = tuple(check_items)
         self._document: Document | None = None
@@ -135,8 +137,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         notice = QLabel(
-            "文档导入与查看已实现：选择 .docx 文件后显示文本块与删除线格式。"
-            "后台核查与检查项管理在后续任务中实现。"
+            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。检查项管理在后续任务中实现。"
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -168,14 +169,29 @@ class MainWindow(QMainWindow):
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
         self._warnings_label.setVisible(False)
-        self._blocks_view = QTextBrowser()
 
-        panel = QGroupBox("文档")
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.addWidget(self._summary_label)
-        panel_layout.addWidget(self._warnings_label)
-        panel_layout.addWidget(self._blocks_view, 1)
-        layout.addWidget(panel, 1)
+        # Summary + search strip.
+        strip = QHBoxLayout()
+        strip.addWidget(self._summary_label)
+        strip.addWidget(self._warnings_label)
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("搜索：编号 / 名称 / 类别 / 期望描述")
+        self._search_input.setClearButtonEnabled(True)
+        strip.addWidget(self._search_input)
+        layout.addLayout(strip)
+
+        # Result list (left) + detail (right).
+        self._splitter = QSplitter()
+        self._result_list = QListWidget()
+        self._result_list.setMinimumWidth(240)
+        self._detail_view = QTextBrowser()
+        self._detail_view.setOpenExternalLinks(False)
+        self._splitter.addWidget(self._result_list)
+        self._splitter.addWidget(self._detail_view)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 3)
+        layout.addWidget(self._splitter, 1)
+
         self.setCentralWidget(central)
         self.statusBar().showMessage("尚未导入文档")
         self._thread: QThread | None = None
@@ -395,7 +411,7 @@ class MainWindow(QMainWindow):
         else:
             self._warnings_label.setText("")
             self._warnings_label.setVisible(False)
-        self._blocks_view.setHtml(format_blocks_html(document))
+        self._detail_view.setHtml(format_blocks_html(document))
         self.statusBar().showMessage(
             f"已导入 {document.filename} · {len(document.blocks)} 个文本块"
             f" · 覆盖范围：{coverage_text}"
@@ -408,7 +424,7 @@ class MainWindow(QMainWindow):
         self._summary_label.setText(f"导入失败：{failure.filename}")
         self._warnings_label.setText("")
         self._warnings_label.setVisible(False)
-        self._blocks_view.setHtml(
+        self._detail_view.setHtml(
             f"<p>无法读取所选文件（原因：{html.escape(failure.reason)}）。</p>"
             f"<p>{html.escape(failure.detail)}</p>"
         )
