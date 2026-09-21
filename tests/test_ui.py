@@ -1135,6 +1135,66 @@ class TestSourceContext:
         window.close()
 
 
+class TestLimitedCoverage:
+    def _limited_doc(self):
+        return Document(
+            document_id="doc-ui",
+            filename="ui.docx",
+            content_fingerprint="fp",
+            blocks=(_block("body:p0", "功能"),),
+            coverage=Coverage.LIMITED,
+            warnings=("页眉未解析",),
+        )
+
+    def test_limited_notice_visible_with_completed_results(self, qapp) -> None:
+        document = self._limited_doc()
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        results = (
+            _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),)),
+        )
+        window.complete_verification(window._op_generation, results)
+        assert window._warnings_label.isHidden() is False
+        assert "检查范围受限" in window._warnings_label.text()
+        window.close()
+
+    def test_limited_notice_visible_with_missing(self, qapp) -> None:
+        document = self._limited_doc()
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        missing = _result("m", status=CheckStatus.MISSING)
+        window.complete_verification(window._op_generation, (missing,))
+        window._show_detail(missing)
+        assert window._warnings_label.isHidden() is False
+        assert "在已检查范围内" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_filters_do_not_hide_coverage_notice(self, qapp) -> None:
+        document = self._limited_doc()
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        results = (
+            _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),)),
+        )
+        window.complete_verification(window._op_generation, results)
+        window._set_filter("仅异常")
+        assert window._warnings_label.isHidden() is False
+        window.close()
+
+    def test_detail_navigation_does_not_hide_coverage_notice(self, qapp) -> None:
+        document = self._limited_doc()
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        ev1 = _evidence(evidence_id="e1")
+        ev2 = _evidence(evidence_id="e2", requirement_text="第二处")
+        results = (_result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev1, ev2)),)
+        window.complete_verification(window._op_generation, results)
+        window._show_detail(results[0])
+        window._select_evidence(1)
+        assert window._warnings_label.isHidden() is False
+        window.close()
+
+
 class TestPureFormatting:
     def test_body_location_is_one_based(self) -> None:
         location = DocumentLocation(
