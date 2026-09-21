@@ -45,6 +45,11 @@ Resolution、ComparisonState、MatchType、StrikeCoverage、MatchEvidence）与
 245 项测试通过，包含合成 DOCX → 摄取 → 核查的组合测试；未引入模糊／语义
 匹配、置信度分数、第四种状态，未提前实现 Task 4 UI 或 Task 5 持久化。
 
+**2026-09-21 修复：** Task 3 取消检查点语义已修复。检查点现在紧接在每个
+（CheckItem, 块）候选搜索之前执行，而不是在匹配工作之前成批触发；跨条目
+歧义与要求范围关联仍在该块所有候选收集完毕后运行。未更改任何匹配策略。
+246 项测试通过。
+
 [English source](../docs/implementation-plan.md)
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。

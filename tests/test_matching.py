@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import pytest
 
+from design_requirement_checker import matching as matching_module
 from design_requirement_checker.domain import (
     BlockType,
     CheckItem,
@@ -643,3 +644,37 @@ class TestCancellation:
         with pytest.raises(VerificationCancelled):
             verify(make_document(*blocks), items, cancel_check=cancel_after_five)
         assert calls["n"] == 6  # stopped at the first checkpoint after the request
+
+    def test_checkpoint_immediately_precedes_each_items_matching_work(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: the broken implementation fired all checkpoints for a
+        # block before doing any matching work, so a count-based assertion
+        # passed while cancellation still ran both items together. Prove that
+        # item A's candidate search runs (and only A's) when the second
+        # checkpoint requests cancellation.
+        processed: list[str] = []
+        original_collect = matching_module._collect_candidates
+
+        def spy_collect(item, norm, raw_text):  # type: ignore[no-untyped-def]
+            processed.append(item.item_id)
+            return original_collect(item, norm, raw_text)
+
+        monkeypatch.setattr(matching_module, "_collect_candidates", spy_collect)
+
+        item_a = make_item("a", PHRASE, "")
+        item_b = make_item("b", PHRASE, "")
+        block = make_block(0, [(DOC_SENTENCE, False)])
+
+        calls = {"n": 0}
+
+        def cancel_on_second() -> bool:
+            calls["n"] += 1
+            return calls["n"] == 2
+
+        with pytest.raises(VerificationCancelled):
+            verify(make_document(block), (item_a, item_b), cancel_check=cancel_on_second)
+
+        # A's matching work happened; B's did not.
+        assert processed == ["a"]
+        assert calls["n"] == 2
