@@ -11,11 +11,15 @@ import time
 
 import fixture_factory as fixtures
 import pytest
-from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from design_requirement_checker.application import ImportFailure, import_document
+from design_requirement_checker.application import (
+    ImportFailure,
+    VerificationOutcome,
+    VerificationState,
+    import_document,
+)
 from design_requirement_checker.domain import (
     BlockType,
     CheckItem,
@@ -281,6 +285,157 @@ class TestBackgroundImport:
         _process_until(qapp, lambda: True, timeout_ms=500)  # drain queued signals
         # A must not replace B.
         assert "b.docx" in window._summary_label.text()
+        window.close()
+
+
+def _completed_outcome(document: Document) -> VerificationOutcome:
+    from design_requirement_checker.matching import verify
+
+    results = verify(document, (_item(),))
+    return VerificationOutcome(
+        document_id=document.document_id,
+        coverage=document.coverage,
+        coverage_warnings=document.warnings,
+        state=VerificationState.COMPLETED,
+        results=results,
+    )
+
+
+class TestBackgroundVerification:
+    def test_run_sets_verifying_state(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(_document(_block("body:p0", "功能")))
+        window._on_run_clicked()
+        assert window.state is UiState.VERIFYING
+        assert window._run_button.isEnabled() is False
+        assert window._cancel_button.isEnabled() is True
+        window.close()
+
+    def test_completed_verification_applied_when_current(self, qapp) -> None:
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._op_generation = 7
+        window._state = UiState.VERIFYING
+        outcome = _completed_outcome(document)
+        applied = window._on_verification_finished(outcome, 7)
+        assert applied is True
+        assert window.state is UiState.COMPLETED
+        assert len(window.results) == 1
+        window.close()
+
+    def test_stale_verification_is_ignored(self, qapp) -> None:
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._op_generation = 2
+        outcome = _completed_outcome(document)
+        applied = window._on_verification_finished(outcome, 1)
+        assert applied is False
+        assert window.results == ()
+        window.close()
+
+    def test_verification_for_changed_document_is_ignored(self, qapp) -> None:
+        document = _document(_block("body:p0", "功能"))
+        other_loc = DocumentLocation(
+            document_id="other-doc",
+            block_id="body:p0",
+            block_type=BlockType.PARAGRAPH,
+            part="body",
+            paragraph_index=0,
+        )
+        other_block = DocumentBlock(
+            block_id="body:p0",
+            block_type=BlockType.PARAGRAPH,
+            text="功能",
+            runs=(_run("功能"),),
+            location=other_loc,
+        )
+        other = Document(
+            document_id="other-doc",
+            filename="other.docx",
+            content_fingerprint="other-fp",
+            blocks=(other_block,),
+            coverage=Coverage.COMPLETE,
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(other)  # current document is "other"
+        window._op_generation = 3
+        window._state = UiState.VERIFYING
+        # outcome references a different document snapshot.
+        stale = VerificationOutcome(
+            document_id=document.document_id,
+            coverage=document.coverage,
+            coverage_warnings=(),
+            state=VerificationState.COMPLETED,
+            results=(),
+        )
+        applied = window._on_verification_finished(stale, 3)
+        assert applied is False
+        assert window.results == ()
+        window.close()
+
+    def test_cancelled_verification_has_no_results(self, qapp) -> None:
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._op_generation = 1
+        window._state = UiState.VERIFYING
+        cancelled = VerificationOutcome(
+            document_id=document.document_id,
+            coverage=document.coverage,
+            coverage_warnings=(),
+            state=VerificationState.CANCELLED,
+            results=(),
+        )
+        applied = window._on_verification_finished(cancelled, 1)
+        assert applied is True
+        assert window.state is UiState.CANCELLED
+        assert window.results == ()
+        window.close()
+
+    def test_verification_runs_in_background(self, qapp, tmp_path) -> None:
+        document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
+        window = MainWindow(check_items=(_item("a", "plain"),))
+        window.set_document(document)
+        window._on_run_clicked()
+        assert window.state is UiState.VERIFYING
+        assert _process_until(qapp, lambda: window.state is UiState.COMPLETED)
+        assert len(window.results) == 1
+        window.close()
+
+    def test_cancel_then_new_run_ignores_late_first_run(self, qapp) -> None:
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        # Run 1 starts (generation 1), then is cancelled.
+        window._op_generation = 1
+        window._state = UiState.VERIFYING
+        window._cancel_event = threading.Event()
+        window._on_cancel_clicked()
+        # Run 2 starts (newer generation).
+        window._op_generation = 2
+        window._state = UiState.VERIFYING
+        # Late run-1 completion must be ignored.
+        run1_outcome = VerificationOutcome(
+            document_id=document.document_id,
+            coverage=document.coverage,
+            coverage_warnings=(),
+            state=VerificationState.CANCELLED,
+            results=(),
+        )
+        applied = window._on_verification_finished(run1_outcome, 1)
+        assert applied is False
+        # Run 2's completion still applies.
+        run2_outcome = VerificationOutcome(
+            document_id=document.document_id,
+            coverage=document.coverage,
+            coverage_warnings=(),
+            state=VerificationState.COMPLETED,
+            results=window.results,
+        )
+        applied2 = window._on_verification_finished(run2_outcome, 2)
+        assert applied2 is True
         window.close()
 
 

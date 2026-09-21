@@ -15,6 +15,7 @@ Task 4 subtasks; the state transitions here are the foundation they build on.
 from __future__ import annotations
 
 import html
+import threading
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -34,6 +35,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from design_requirement_checker.application import (
+    VerificationOutcome,
+    VerificationState,
+)
 from design_requirement_checker.domain import (
     CheckItem,
     CheckResult,
@@ -42,7 +47,7 @@ from design_requirement_checker.domain import (
     DocumentLocation,
     TextRun,
 )
-from design_requirement_checker.ui.workers import ImportWorker
+from design_requirement_checker.ui.workers import ImportWorker, VerificationWorker
 
 if TYPE_CHECKING:
     from design_requirement_checker.application import ImportFailure
@@ -142,9 +147,11 @@ class MainWindow(QMainWindow):
         actions.addWidget(self._import_button)
         self._run_button = QPushButton("开始核查")
         self._run_button.setEnabled(False)
+        self._run_button.clicked.connect(self._on_run_clicked)
         actions.addWidget(self._run_button)
         self._cancel_button = QPushButton("取消核查")
         self._cancel_button.setEnabled(False)
+        self._cancel_button.clicked.connect(self._on_cancel_clicked)
         actions.addWidget(self._cancel_button)
         self._manage_button = QPushButton("检查项管理")
         self._manage_button.setEnabled(False)
@@ -172,8 +179,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("尚未导入文档")
         self._thread: QThread | None = None
-        self._worker: ImportWorker | None = None
+        self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
+        self._cancel_event: threading.Event | None = None
         self._update_actions()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -316,6 +324,61 @@ class MainWindow(QMainWindow):
             self._show_failure(outcome)
         else:
             self.set_document(outcome)
+
+    # --- background verification -------------------------------------------
+
+    def _on_run_clicked(self) -> None:
+        if self._document is None or not self._check_items:
+            return
+        generation = self.start_verification()
+        self._cancel_event = threading.Event()
+        self._progress.setVisible(True)
+        self.statusBar().showMessage("正在核查…")
+
+        self._thread = QThread()
+        self._worker = VerificationWorker(
+            self._document, self._check_items, self._cancel_event, generation
+        )
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_verification_finished)
+        self._worker.finished.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(
+            lambda: (
+                self._active_threads.remove(self._thread)
+                if self._thread in self._active_threads
+                else None
+            )
+        )
+        self._active_threads.append(self._thread)
+        self._thread.start()
+
+    def _on_cancel_clicked(self) -> None:
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+
+    def _on_verification_finished(self, outcome: VerificationOutcome, generation: int) -> bool:
+        """Apply a verification outcome only if it is still current.
+
+        Stale outcomes (wrong generation or a document that is no longer
+        current) are discarded. A cancelled run never carries results.
+        """
+        if generation != self._op_generation:
+            return False
+        if self._document is None or outcome.document_id != self._document.document_id:
+            return False
+        self._progress.setVisible(False)
+        self._thread = None
+        self._worker = None
+        if outcome.state is VerificationState.CANCELLED:
+            self.cancel_verification()
+        elif outcome.state is VerificationState.COMPLETED:
+            self.complete_verification(generation, outcome.results)
+        else:  # VerificationState.FAILED
+            self.fail_verification("verification failed")
+        return True
 
     def _show_document(self, document: Document) -> None:
         if document.coverage is Coverage.COMPLETE:
