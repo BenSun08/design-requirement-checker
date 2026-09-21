@@ -30,7 +30,10 @@ from design_requirement_checker.domain import (
     Document,
     DocumentBlock,
     DocumentLocation,
+    MatchEvidence,
+    MatchType,
     Resolution,
+    StrikeCoverage,
     TableCellCoordinates,
     TextRun,
 )
@@ -108,6 +111,58 @@ def _result(
         comparison_reason="",
         review_reasons=(),
         rule_revision="r1",
+    )
+
+
+def _evidence(
+    *,
+    evidence_id: str = "e1",
+    requirement_text: str = "2门控制增加开关门延时3s功能",
+    match_type: MatchType = MatchType.EXACT,
+    block_id: str = "body:p0",
+) -> MatchEvidence:
+    return MatchEvidence(
+        evidence_id=evidence_id,
+        document_id="doc-ui",
+        block_id=block_id,
+        location=DocumentLocation(
+            document_id="doc-ui",
+            block_id=block_id,
+            block_type=BlockType.PARAGRAPH,
+            part="body",
+            paragraph_index=0,
+        ),
+        raw_text=requirement_text,
+        matched_span=(0, len(requirement_text)),
+        requirement_span=(0, len(requirement_text)),
+        requirement_text=requirement_text,
+        matched_term=requirement_text,
+        match_type=match_type,
+        transformations=(),
+        strike_coverage=StrikeCoverage.NONE,
+    )
+
+
+def _result_with_evidence(
+    item_id: str,
+    *,
+    status: CheckStatus | None,
+    comparison_state: ComparisonState = ComparisonState.SAME,
+    evidence: tuple[MatchEvidence, ...] = (),
+    review_reasons: tuple[str, ...] = (),
+    comparison_reason: str = "",
+) -> CheckResult:
+    return CheckResult(
+        check_item=_item(item_id, "x"),
+        document_id="doc-ui",
+        resolution=Resolution.RESOLVED if status is not None else Resolution.UNRESOLVED,
+        status=status,
+        evidence=evidence,
+        comparison_state=comparison_state,
+        comparison_reason=comparison_reason,
+        review_reasons=review_reasons,
+        rule_revision="r1",
+        primary_evidence_id=evidence[0].evidence_id if evidence else "",
     )
 
 
@@ -694,6 +749,149 @@ class TestFiltersAndSearch:
         assert window._result_list.count() == 1
         window._search_input.clear()
         assert window._result_list.count() == 5
+        window.close()
+
+
+class TestResultDetail:
+    def test_detail_shows_code_name_category(self, qapp) -> None:
+        item = CheckItem(
+            item_id="a",
+            code="R-001",
+            name="门控延时",
+            detection_phrase="x",
+            category="门禁",
+            expected_description="2门控制增加开关门延时2s功能",
+        )
+        result = CheckResult(
+            check_item=item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(_evidence(),),
+            comparison_state=ComparisonState.SAME,
+            comparison_reason="",
+            review_reasons=(),
+            rule_revision="r1",
+            primary_evidence_id="e1",
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "R-001" in text
+        assert "门控延时" in text
+        assert "门禁" in text
+        window.close()
+
+    def test_status_mapping_configured(self, qapp) -> None:
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),))
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "已配置" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_status_mapping_missing(self, qapp) -> None:
+        result = _result("m", status=CheckStatus.MISSING)
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "未配置" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_status_mapping_struck_out(self, qapp) -> None:
+        result = _result_with_evidence("s", status=CheckStatus.STRUCK_OUT, evidence=(_evidence(),))
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "已划除" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_status_mapping_unresolved(self, qapp) -> None:
+        result = _result("u", status=None, resolution=Resolution.UNRESOLVED)
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "待人工核查" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_comparison_state_mappings(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        diff = _result_with_evidence(
+            "d",
+            status=CheckStatus.CONFIGURED,
+            comparison_state=ComparisonState.DIFFERENT,
+            evidence=(_evidence(),),
+        )
+        window._show_detail(diff)
+        assert "描述有差异" in window._detail_view.toPlainText()
+        nc = _result_with_evidence(
+            "n",
+            status=CheckStatus.CONFIGURED,
+            comparison_state=ComparisonState.NOT_COMPARED,
+            evidence=(_evidence(),),
+        )
+        window._show_detail(nc)
+        assert "未比较描述" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_expected_and_actual_text_shown(self, qapp) -> None:
+        item = CheckItem(
+            item_id="a",
+            code="A",
+            name="n",
+            detection_phrase="x",
+            expected_description="2门控制增加开关门延时2s功能",
+        )
+        ev = _evidence(requirement_text="2门控制增加开关门延时3s功能")
+        result = CheckResult(
+            check_item=item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev,),
+            comparison_state=ComparisonState.DIFFERENT,
+            comparison_reason="delay differs",
+            review_reasons=(),
+            rule_revision="r1",
+            primary_evidence_id="e1",
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "2门控制增加开关门延时2s功能" in text
+        assert "2门控制增加开关门延时3s功能" in text
+        window.close()
+
+    def test_match_method_label(self, qapp) -> None:
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(_evidence(match_type=MatchType.NORMALIZED),),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "规范化匹配" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_never_shows_passed_or_confidence(self, qapp) -> None:
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),))
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText().lower()
+        assert "pass" not in text
+        assert "通过" not in window._detail_view.toPlainText()
+        assert "confidence" not in text
+        window.close()
+
+    def test_unresolved_reason_tokens_mapped_to_chinese(self, qapp) -> None:
+        result = _result_with_evidence(
+            "u",
+            status=None,
+            review_reasons=("partial-strike", "ambiguous-function-identity"),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "partial-strike" not in text
+        assert "ambiguous-function-identity" not in text
+        # Chinese mapped text should appear (at least non-empty reason text).
+        assert "核查原因" in text
         window.close()
 
 

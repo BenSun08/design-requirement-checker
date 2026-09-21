@@ -51,6 +51,8 @@ from design_requirement_checker.domain import (
     Coverage,
     Document,
     DocumentLocation,
+    MatchEvidence,
+    MatchType,
     Resolution,
     TextRun,
 )
@@ -60,6 +62,27 @@ if TYPE_CHECKING:
     from design_requirement_checker.application import ImportFailure
 
 _LEGEND = "图例：<s>删除线</s>＝已划线文本；〔…〕＝删除线状态未知；其余为未划线原文。"
+
+_COMPARISON_LABELS = {
+    ComparisonState.SAME: "描述一致",
+    ComparisonState.DIFFERENT: "描述有差异",
+    ComparisonState.NOT_COMPARED: "未比较描述",
+}
+
+_MATCH_TYPE_LABELS = {
+    MatchType.EXACT: "精确匹配",
+    MatchType.NORMALIZED: "规范化匹配",
+    MatchType.ALIAS: "别名匹配",
+}
+
+# UI-only mapping of stable UNRESOLVED reason tokens to Chinese text.
+_REASON_LABELS: dict[str, str] = {
+    "partial-strike": "部分划线",
+    "unknown-strike-formatting": "划线格式未知",
+    "active-and-struck-coexist": "生效与划线共存",
+    "conflicting-key-parameters": "关键参数冲突",
+    "ambiguous-function-identity": "功能身份歧义",
+}
 
 
 @dataclass(frozen=True)
@@ -244,6 +267,7 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 3)
         layout.addWidget(self._splitter, 1)
+        self._result_list.currentItemChanged.connect(self._on_result_selected)
 
         self.setCentralWidget(central)
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
@@ -253,9 +277,11 @@ class MainWindow(QMainWindow):
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
         self._cancel_event: threading.Event | None = None
+        self._closing = False
         self._update_actions()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._closing = True
         self._stop_worker()
         super().closeEvent(event)
 
@@ -394,6 +420,64 @@ class MainWindow(QMainWindow):
         ).lower()
         return query in haystack
 
+    # --- result detail ------------------------------------------------------
+
+    def _on_result_selected(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+    ) -> None:
+        if self._closing or current is None:
+            return
+        result = current.data(Qt.ItemDataRole.UserRole)
+        if isinstance(result, CheckResult):
+            self._show_detail(result)
+
+    @staticmethod
+    def _status_text(result: CheckResult) -> str:
+        if result.resolution is Resolution.UNRESOLVED:
+            return "待人工核查"
+        if result.status is CheckStatus.CONFIGURED:
+            return "已配置"
+        if result.status is CheckStatus.MISSING:
+            return "未配置"
+        if result.status is CheckStatus.STRUCK_OUT:
+            return "已划除"
+        return "未知"
+
+    @staticmethod
+    def _primary_evidence(result: CheckResult) -> MatchEvidence | None:
+        for evidence in result.evidence:
+            if evidence.evidence_id == result.primary_evidence_id:
+                return evidence
+        return result.evidence[0] if result.evidence else None
+
+    def _show_detail(self, result: CheckResult) -> None:
+        item = result.check_item
+        primary = self._primary_evidence(result)
+        actual_text = primary.requirement_text if primary is not None else ""
+        match_method = _MATCH_TYPE_LABELS.get(primary.match_type, "") if primary is not None else ""
+        comparison_text = _COMPARISON_LABELS.get(result.comparison_state, "未比较描述")
+
+        parts: list[str] = [
+            f"<h3>{html.escape(item.code)} · {html.escape(item.name)}</h3>",
+            f"<p>类别：{html.escape(item.category)}</p>",
+            f"<p>状态：{self._status_text(result)}</p>",
+            f"<p>描述比较：{comparison_text}</p>",
+            f"<p>期望描述：{html.escape(item.expected_description)}</p>",
+        ]
+        if actual_text:
+            parts.append(f"<p>实际需求：{html.escape(actual_text)}</p>")
+        if match_method:
+            parts.append(f"<p>匹配方式：{match_method}</p>")
+        if result.comparison_reason:
+            parts.append(f"<p>比较原因：{html.escape(result.comparison_reason)}</p>")
+        if result.review_reasons:
+            reasons = "".join(
+                f"<li>{html.escape(_REASON_LABELS.get(r, r))}</li>" for r in result.review_reasons
+            )
+            parts.append(f"<p>核查原因：</p><ul>{reasons}</ul>")
+
+        self._detail_view.setHtml("".join(parts))
+
     def _update_summary(self) -> None:
         if not self._results:
             return
@@ -473,7 +557,7 @@ class MainWindow(QMainWindow):
 
     def _on_import_finished(self, outcome: Document | ImportFailure, generation: int) -> bool:
         """Apply the import outcome only if its generation is still current."""
-        if generation != self._op_generation:
+        if self._closing or generation != self._op_generation:
             return False
         self._progress.setVisible(False)
         self._thread = None
@@ -530,7 +614,7 @@ class MainWindow(QMainWindow):
         Stale outcomes (wrong generation or a document that is no longer
         current) are discarded. A cancelled run never carries results.
         """
-        if generation != self._op_generation:
+        if self._closing or generation != self._op_generation:
             return False
         if self._document is None or outcome.document_id != self._document.document_id:
             return False
