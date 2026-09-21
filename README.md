@@ -3,8 +3,10 @@
 **Python + PySide6 / Qt Widgets desktop application.** Document ingestion is
 implemented as a validated vertical slice: import a real `.docx`, view its
 blocks with effective-strike formatting and honest coverage warnings. The DOCX
-access strategy is backed by executed S1/S2 spike evidence. Matching,
-persistence and Windows distribution remain pending.
+access strategy is backed by executed S1/S2 spike evidence. Deterministic
+verification (Task 3) is implemented as a pure matching engine on the
+validated S6 rule contract; the Qt review workspace, persistence and Windows
+distribution remain pending.
 
 ## Development platforms
 
@@ -87,23 +89,33 @@ stores no baseline. `prototype/` remains a separate historical mock.
 
 - `src/design_requirement_checker/__main__.py`: startup and Qt composition.
 - `src/design_requirement_checker/domain.py`: validated document-snapshot value
-  models (blocks, runs, locations, coverage); no Qt/filesystem imports.
+  models (blocks, runs, locations, coverage) plus the verification models
+  (CheckItem, CheckResult, MatchEvidence and the status/resolution/comparison
+  contracts); no Qt/filesystem imports.
 - `src/design_requirement_checker/docx_adapter.py`: OOXML ingestion via
   python-docx 1.2.0 + focused OOXML/XML access; the only module touching
   python-docx objects; returns domain values.
+- `src/design_requirement_checker/matching.py`: pure deterministic verification
+  implementing the validated S6 contract (normalization allowlist with raw-span
+  traceability, exact/normalized/alias detection, requirement-span association,
+  strike coverage, classification and comparison); domain values in and out.
 - `src/design_requirement_checker/application.py`: import coordination
-  (`import_document` → Document or explicit ImportFailure).
+  (`import_document` → Document or explicit ImportFailure) and verification
+  coordination (`verify_document` → VerificationOutcome with an explicit
+  completed/cancelled lifecycle).
 - `src/design_requirement_checker/ui/main_window.py`: minimal Qt document view;
   calls the application use case only.
-- `matching.py` and `baseline_store.py` inside the package: documented
-  responsibility boundaries only; no business APIs yet.
+- `baseline_store.py` inside the package: documented responsibility boundary
+  only; no business APIs yet.
 - `tests/test_domain.py`, `tests/test_docx_adapter.py`, `tests/test_application.py`,
-  `tests/test_ui.py`, `tests/test_startup.py`: Task 2 vertical-slice tests with
-  hand-written expected labels.
+  `tests/test_matching.py`, `tests/test_ui.py`, `tests/test_startup.py`: Task 2/Task 3
+  vertical-slice tests with hand-written expected labels.
 - `tests/fixture_factory.py`, `tests/docx_probe.py`, `tests/test_spike_s1_oxml_fidelity.py`,
   `tests/test_spike_s2_locations_coverage.py`: S1/S2 spike — deterministic synthetic
   DOCX fixtures, exploratory python-docx + OOXML probe, and evidence tests with
   independent expected labels (see `docs/technical-spikes.md`). Not production code.
+- `tests/s6_probe.py`, `tests/test_spike_s6_rules.py`, `tests/test_spike_s6_scale.py`:
+  S6 spike evidence for the deterministic rules Task 3 implements. Not production code.
 - `tests/fixtures/`: conventions for future synthetic fixtures and independent labels.
 - `pyproject.toml`: package metadata and pinned direct development dependencies.
 
@@ -164,7 +176,7 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 - [Domain model](docs/domain-model.md): technology-neutral concepts and invariants.
 - [UX specification](docs/ux-spec.md): workflows, states and review route.
 - [Technology options](docs/technology-options.md): five options, ordinal matrix and provisional recommendation with primary references.
-- [Technical spikes](docs/technical-spikes.md): S1/S2 executed with recorded evidence; S3/S6 and persistence validation still planned.
+- [Technical spikes](docs/technical-spikes.md): S1/S2 and S6 executed with recorded evidence; S3 and persistence validation still planned.
 - [Delivery roadmap](docs/delivery-roadmap.md): technology-neutral milestones.
 - [Prototype verification](docs/prototype-verification.md): observed checks and limitations.
 
@@ -181,7 +193,10 @@ selected — see the technical-spike evidence), and the Task 2 vertical slice
 implements real DOCX import and viewing end-to-end; a review-driven remediation
 slice closed its ingestion/coverage gaps (hyperlink-wrapped runs, header/footer
 variants, unsupported-structure detection, default-style resolution, error
-categories, preview whitespace — see the technical-spike evidence). Matching
-(S6), storage, background execution and real Windows no-admin/offline
-deployment evidence are still pending. See the implementation plan for
-subsequent slices.
+categories, preview whitespace — see the technical-spike evidence). The S6
+spike validated the deterministic rules, and the Task 3 slice implements the
+production matching engine on exactly that contract (deterministic detection,
+evidence, classification and comparison, with cancellation and a
+completed/cancelled run lifecycle). Storage, background execution, the Qt
+review workspace and real Windows no-admin/offline deployment evidence are
+still pending. See the implementation plan for subsequent slices.

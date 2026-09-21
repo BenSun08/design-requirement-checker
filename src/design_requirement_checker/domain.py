@@ -12,6 +12,10 @@ from typing import Literal
 
 Part = Literal["body", "table-cell"]
 
+#: Identifier of the deterministic rule set carried by every CheckResult.
+#: Bump it whenever the verified rule behavior changes (docs/domain-model.md).
+RULE_REVISION = "task3-v1"
+
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
 SUPPORTED_SCOPE: tuple[str, ...] = ("body-paragraphs", "table-cell-paragraphs")
@@ -174,3 +178,159 @@ class Document:
         if self.coverage is Coverage.LIMITED and not self.warnings:
             raise ValueError("a LIMITED document requires at least one warning")
         object.__setattr__(self, "warnings", tuple(sorted(set(self.warnings))))
+
+
+class CheckStatus(Enum):
+    """Document evidence status; never confidence or approval."""
+
+    CONFIGURED = "configured"
+    MISSING = "missing"
+    STRUCK_OUT = "struck-out"
+
+
+class Resolution(Enum):
+    """UNRESOLVED is a review condition with status unset, not a fourth status."""
+
+    RESOLVED = "resolved"
+    UNRESOLVED = "unresolved"
+
+
+class ComparisonState(Enum):
+    """Expected-description comparison; independent of detection and status."""
+
+    SAME = "same"
+    DIFFERENT = "different"
+    NOT_COMPARED = "not-compared"
+
+
+class MatchType(Enum):
+    """Initial deterministic match methods; FUZZY/MANUAL/SEMANTIC stay reserved."""
+
+    EXACT = "exact"
+    NORMALIZED = "normalized"
+    ALIAS = "alias"
+
+
+class StrikeCoverage(Enum):
+    """Strike over the matched requirement span, never the whole paragraph."""
+
+    NONE = "none"
+    FULL = "full"
+    PARTIAL = "partial"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class CheckItemAlias:
+    """An explicitly configured alternative detection phrase of one CheckItem.
+
+    An alias establishes function identity only; it never asserts that the
+    expected description is satisfied.
+    """
+
+    alias_id: str
+    text: str
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.alias_id or not self.text:
+            raise ValueError("alias_id and text must be non-empty")
+
+
+@dataclass(frozen=True)
+class CheckItem:
+    """Immutable baseline snapshot used for one verification run.
+
+    ``detection_phrase`` is the only configured detector; ``name`` labels the
+    item and is never used for matching. Persistence and checklist editing
+    belong to later slices.
+    """
+
+    item_id: str
+    code: str
+    name: str
+    detection_phrase: str
+    aliases: tuple[CheckItemAlias, ...] = ()
+    category: str = ""
+    expected_description: str = ""
+    enabled: bool = True
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.item_id or not self.code or not self.name:
+            raise ValueError("item_id, code and name are required")
+        if not self.detection_phrase:
+            raise ValueError("detection_phrase is required and engineer-maintained")
+
+
+@dataclass(frozen=True)
+class MatchEvidence:
+    """One qualifying occurrence with original-document spans.
+
+    All spans are raw half-open code-point ranges into the identified block's
+    stored (unnormalized) text. ``comparison_blocker`` carries a stable reason
+    token when this occurrence cannot safely take part in description
+    comparison; ``ambiguous`` marks spans claimed by different configured term
+    texts across items.
+    """
+
+    evidence_id: str
+    document_id: str
+    block_id: str
+    location: DocumentLocation
+    raw_text: str
+    matched_span: tuple[int, int]
+    requirement_span: tuple[int, int]
+    requirement_text: str
+    matched_term: str
+    match_type: MatchType
+    transformations: tuple[str, ...]
+    strike_coverage: StrikeCoverage
+    alias_id: str = ""
+    ambiguous: bool = False
+    comparison_blocker: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.evidence_id:
+            raise ValueError("evidence_id must be non-empty")
+        if self.location.document_id != self.document_id:
+            raise ValueError("evidence location must reference its document")
+        if self.location.block_id != self.block_id:
+            raise ValueError("evidence location must reference its block")
+        start, end = self.matched_span
+        if not (0 <= start < end <= len(self.raw_text)):
+            raise ValueError("matched_span must be a non-empty raw span")
+        req_start, req_end = self.requirement_span
+        if not (0 <= req_start < req_end <= len(self.raw_text)):
+            raise ValueError("requirement_span must be a non-empty raw span")
+        if not (req_start <= start and end <= req_end):
+            raise ValueError("the matched span must lie inside the requirement span")
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """Verification result for one enabled CheckItem against one document.
+
+    Invariant: RESOLVED carries exactly one CheckStatus; UNRESOLVED carries
+    none. Evidence keeps every qualifying occurrence in source order — no
+    winner is chosen and no contradictory occurrence is discarded.
+    """
+
+    check_item: CheckItem
+    document_id: str
+    resolution: Resolution
+    status: CheckStatus | None
+    evidence: tuple[MatchEvidence, ...]
+    comparison_state: ComparisonState
+    comparison_reason: str
+    review_reasons: tuple[str, ...]
+    rule_revision: str
+    primary_evidence_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.resolution is Resolution.RESOLVED and self.status is None:
+            raise ValueError("a RESOLVED result requires exactly one status")
+        if self.resolution is Resolution.UNRESOLVED and self.status is not None:
+            raise ValueError("an UNRESOLVED result must not carry a status")
+        if not self.rule_revision:
+            raise ValueError("rule_revision must be non-empty")
