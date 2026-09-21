@@ -302,7 +302,8 @@ class TestBackgroundImport:
         assert window.state is UiState.IMPORTING
         assert window._import_button.isEnabled() is False
         assert window._run_button.isEnabled() is False
-        assert window._cancel_button.isEnabled() is True
+        # Cancel is not offered during import (no cooperative cancellation).
+        assert window._cancel_button.isEnabled() is False
         window.close()
 
     def test_matching_generation_applies_import_success(self, qapp) -> None:
@@ -362,6 +363,10 @@ class TestBackgroundImport:
 
         window = MainWindow()
         window._start_import(path_a)  # A blocks
+        thread_a = window._thread
+        # Let A's worker reach a_release.wait() so set() actually wakes it.
+        time.sleep(0.2)
+        qapp.processEvents()
         window._start_import(path_b)  # B completes fast
         assert _process_until(qapp, lambda: window.state is UiState.READY)
         assert "b.docx" in window._summary_label.text()
@@ -369,6 +374,87 @@ class TestBackgroundImport:
         _process_until(qapp, lambda: True, timeout_ms=500)  # drain queued signals
         # A must not replace B.
         assert "b.docx" in window._summary_label.text()
+        # Wait for A's thread to exit so close() doesn't leave it running.
+        thread_a.quit()
+        deadline = time.time() + 3.0
+        while thread_a.isRunning() and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        qapp.processEvents()
+        window.close()
+
+    def test_stale_import_does_not_clear_current_thread_refs(
+        self, qapp, tmp_path, monkeypatch
+    ) -> None:
+        from PySide6.QtCore import QThread
+
+        import design_requirement_checker.application as app_mod
+
+        path_a = str(tmp_path / "a.docx")
+        path_b = str(fixtures.build_normal(tmp_path / "b.docx"))
+        a_release = threading.Event()
+
+        def fake_import(path):
+            if path == path_a:
+                a_release.wait(timeout=5)
+                return ImportFailure("a.docx", "file-access-error", "stale")
+            return import_document(path)
+
+        monkeypatch.setattr(app_mod, "import_document", fake_import)
+
+        window = MainWindow()
+        window._start_import(path_a)  # A blocks
+        thread_a = window._thread
+        # Let A's worker reach a_release.wait() so set() actually wakes it.
+        time.sleep(0.2)
+        qapp.processEvents()
+        window._start_import(path_b)  # B completes fast; replaces current refs
+        assert _process_until(qapp, lambda: window.state is UiState.READY)
+        # B's normal completion clears the current refs.
+        assert window._thread is None
+        a_release.set()  # let the stale A finish
+        _process_until(qapp, lambda: True, timeout_ms=800)  # drain queued signals
+        # Stale A must not have overwritten B's document.
+        assert "b.docx" in window._summary_label.text()
+        # A's worker has finished and (via direct connection) quit its thread.
+        # Wait for the thread to actually exit before removing its reference.
+        thread_a.quit()
+        deadline = time.time() + 3.0
+        while thread_a.isRunning() and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert not thread_a.isRunning()
+        qapp.processEvents()  # drain thread.finished -> _on_thread_finished
+
+        # Simulate a newer operation holding the current thread/worker refs.
+        newer_thread = QThread()
+        window._thread = newer_thread
+        window._worker = object()
+        window._op_generation = 99
+        # A late A finish with a stale generation must not clear current refs
+        # and must return False.
+        a_failure = ImportFailure("a.docx", "file-access-error", "stale")
+        applied = window._on_import_finished(a_failure, 1)
+        assert applied is False
+        assert window._thread is newer_thread
+        # A's thread was already removed by its finished signal.
+        assert thread_a not in window._active_threads
+        window.close()
+
+    def test_on_thread_finished_removes_exact_thread(self, qapp) -> None:
+        from PySide6.QtCore import QThread
+
+        window = MainWindow()
+        t1 = QThread()
+        t2 = QThread()
+        window._active_threads = [t1, t2]
+        window._on_thread_finished(t1)
+        assert window._active_threads == [t2]
+        window._on_thread_finished(t2)
+        assert window._active_threads == []
+        # A thread not in the set is a no-op.
+        window._on_thread_finished(t1)
+        assert window._active_threads == []
         window.close()
 
 

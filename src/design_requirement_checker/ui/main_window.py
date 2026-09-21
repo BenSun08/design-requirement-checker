@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import html
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -313,6 +313,9 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
+        #: Thread owned by each operation generation, so a stale completion can
+        #: still quit exactly its own thread without touching current refs.
+        self._thread_for_generation: dict[int, QThread] = {}
         self._cancel_event: threading.Event | None = None
         self._closing = False
         self._detail_result: CheckResult | None = None
@@ -325,11 +328,27 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _stop_worker(self) -> None:
-        """Quit every running background thread; blocks briefly for clean exit."""
+        """Quit every running background thread; retain ownership of any thread
+        that has not yet finished so it is never destroyed while running.
+
+        For verification workers the cooperative cancel event is set first so
+        matching stops promptly. Import workers have no cooperative cancel;
+        they are simply told to quit and, if still running after a brief wait,
+        retained (never destroyed) until they finish on their own.
+        """
+        # Cooperative cancellation for verification work (Task 3).
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        finished_threads: list[QThread] = []
         for thread in list(self._active_threads):
             thread.quit()
-            thread.wait(2000)
-        self._active_threads.clear()
+            if thread.wait(2000):
+                finished_threads.append(thread)
+        # Only release threads that actually finished; keep the rest owned so
+        # their C++ object is not destroyed while the OS thread is still alive.
+        for thread in finished_threads:
+            if thread in self._active_threads:
+                self._active_threads.remove(thread)
         self._thread = None
         self._worker = None
         # Drain queued worker-finished signals so they don't fire after close.
@@ -619,7 +638,8 @@ class MainWindow(QMainWindow):
             UiState.FAILED,
         )
         self._run_button.setEnabled(can_run and s in runnable_states)
-        self._cancel_button.setEnabled(s in (UiState.IMPORTING, UiState.VERIFYING))
+        # Cancel only applies to verification; import has no cooperative cancel.
+        self._cancel_button.setEnabled(s is UiState.VERIFYING)
         self._manage_button.setEnabled(False)
 
     # --- background import --------------------------------------------------
@@ -642,33 +662,66 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("正在读取文档…")
         self._update_actions()
 
-        self._thread = QThread()
-        self._worker = ImportWorker(path, generation)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_import_finished)
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(
-            lambda: (
-                self._active_threads.remove(self._thread)
-                if self._thread in self._active_threads
-                else None
-            )
-        )
-        self._active_threads.append(self._thread)
-        self._thread.start()
+        thread = QThread()
+        worker = ImportWorker(path, generation)
+        self._thread = thread
+        self._worker = worker
+        self._wire_worker(thread, worker, generation, self._on_import_finished)
+        thread.start()
+
+    def _wire_worker(
+        self,
+        thread: QThread,
+        worker: ImportWorker | VerificationWorker,
+        generation: int,
+        finished_handler: Callable[..., bool],
+    ) -> None:
+        """Connect a worker to its thread with stable captured references.
+
+        All ``thread.finished`` handlers capture the specific ``thread``/
+        ``worker`` locals so a stale operation's cleanup never touches the
+        current operation's objects. The thread is also registered by
+        generation so handlers can quit exactly their own thread.
+        """
+        self._thread_for_generation[generation] = thread
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(finished_handler)
+        worker.failed.connect(self._on_worker_failed)
+        # quit() is thread-safe; use DirectConnection so the worker thread
+        # stops its own event loop without waiting for the UI thread.
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda t=thread: self._on_thread_finished(t))
+        self._active_threads.append(thread)
+
+    def _on_thread_finished(self, thread: QThread) -> None:
+        """Remove exactly the thread that finished from the active set."""
+        if thread in self._active_threads:
+            self._active_threads.remove(thread)
+
+    def _finish_operation(self, generation: int) -> None:
+        """Quit and forget the thread owned by one operation generation.
+
+        Safe for both current and stale completions: only the thread registered
+        for ``generation`` is quit, and ``self._thread``/``self._worker`` are
+        cleared only when they still refer to this operation.
+        """
+        thread = self._thread_for_generation.pop(generation, None)
+        if thread is not None:
+            thread.quit()
+        if self._thread is thread:
+            self._thread = None
+            self._worker = None
 
     def _on_import_finished(self, outcome: Document | ImportFailure, generation: int) -> bool:
         """Apply the import outcome only if its generation is still current."""
+        self._finish_operation(generation)
         if self._closing or generation != self._op_generation:
             return False
         self._progress.setVisible(False)
-        self._thread = None
-        self._worker = None
         self.show_import_outcome(outcome)
         return True
 
@@ -691,27 +744,14 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(True)
         self.statusBar().showMessage("正在核查…")
 
-        self._thread = QThread()
-        self._worker = VerificationWorker(
+        thread = QThread()
+        worker = VerificationWorker(
             self._document, self._check_items, self._cancel_event, generation
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_verification_finished)
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(
-            lambda: (
-                self._active_threads.remove(self._thread)
-                if self._thread in self._active_threads
-                else None
-            )
-        )
-        self._active_threads.append(self._thread)
-        self._thread.start()
+        self._thread = thread
+        self._worker = worker
+        self._wire_worker(thread, worker, generation, self._on_verification_finished)
+        thread.start()
 
     def _on_cancel_clicked(self) -> None:
         if self._cancel_event is not None:
@@ -723,13 +763,12 @@ class MainWindow(QMainWindow):
         Stale outcomes (wrong generation or a document that is no longer
         current) are discarded. A cancelled run never carries results.
         """
+        self._finish_operation(generation)
         if self._closing or generation != self._op_generation:
             return False
         if self._document is None or outcome.document_id != self._document.document_id:
             return False
         self._progress.setVisible(False)
-        self._thread = None
-        self._worker = None
         if outcome.state is VerificationState.CANCELLED:
             self.cancel_verification()
         elif outcome.state is VerificationState.COMPLETED:
@@ -740,11 +779,10 @@ class MainWindow(QMainWindow):
 
     def _on_worker_failed(self, category: str, detail: str, generation: int) -> bool:
         """Handle an unexpected worker exception; never shows partial results."""
+        self._finish_operation(generation)
         if self._closing or generation != self._op_generation:
             return False
         self._progress.setVisible(False)
-        self._thread = None
-        self._worker = None
         if category == "import-error":
             self._state = UiState.FAILED
             self._document = None
