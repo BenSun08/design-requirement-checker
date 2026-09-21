@@ -119,13 +119,14 @@ def qapp():
 
 
 class TestEnabledActions:
+    _FILTERS = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"}
+
     def test_only_implemented_actions_are_enabled(self, qapp) -> None:
         window = MainWindow()
-        enabled = [
-            button.text() for button in window.findChildren(QPushButton) if button.isEnabled()
-        ]
+        buttons = window.findChildren(QPushButton)
+        enabled = [b.text() for b in buttons if b.isEnabled() and b.text() not in self._FILTERS]
         disabled = [
-            button.text() for button in window.findChildren(QPushButton) if not button.isEnabled()
+            b.text() for b in buttons if not b.isEnabled() and b.text() not in self._FILTERS
         ]
         window.close()
         assert enabled == ["导入 DOCX"]
@@ -573,6 +574,126 @@ class TestSummaryAndOrdering:
         results = verify(document, (_item("a", "功能"),))
         window.complete_verification(window._op_generation, results)
         assert "全部" in window._summary_label.text()
+        window.close()
+
+
+def _window_with_results(qapp, results):
+    window = MainWindow(check_items=(_item(),))
+    window.set_document(_document(_block("body:p0", "x")))
+    window._results = results
+    window._state = UiState.COMPLETED
+    window._populate_results()
+    window._update_summary()
+    return window
+
+
+class TestFiltersAndSearch:
+    def _results(self):
+        return (
+            _result("cfg", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME),
+            _result(
+                "cfg-diff",
+                status=CheckStatus.CONFIGURED,
+                comparison_state=ComparisonState.DIFFERENT,
+            ),
+            _result("miss", status=CheckStatus.MISSING),
+            _result("struck", status=CheckStatus.STRUCK_OUT),
+            _result("unres", status=None, resolution=Resolution.UNRESOLVED),
+        )
+
+    def test_all_filter_shows_everything(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("全部")
+        assert window._result_list.count() == 5
+        window.close()
+
+    def test_configured_filter(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("已配置")
+        assert window._result_list.count() == 2
+        window.close()
+
+    def test_missing_filter(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("未配置")
+        assert window._result_list.count() == 1
+        window.close()
+
+    def test_struck_out_filter(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("已划除")
+        assert window._result_list.count() == 1
+        window.close()
+
+    def test_unresolved_filter(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("待人工核查")
+        assert window._result_list.count() == 1
+        window.close()
+
+    def test_exception_filter_includes_abnormal_only(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._set_filter("仅异常")
+        # MISSING, STRUCK_OUT, UNRESOLVED, CONFIGURED+DIFFERENT → 4
+        assert window._result_list.count() == 4
+        window.close()
+
+    def test_summary_stays_stable_while_filtering(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        before = window._summary_label.text()
+        window._set_filter("未配置")
+        assert window._summary_label.text() == before
+        window.close()
+
+    def test_search_matches_code_name_category_expected(self, qapp) -> None:
+        results = (
+            _result("alpha", status=CheckStatus.CONFIGURED),
+            _result("beta", status=CheckStatus.MISSING),
+        )
+        # Give the alpha item a category and expected description.
+        results = (
+            CheckResult(
+                check_item=CheckItem(
+                    item_id="alpha",
+                    code="ALPHA",
+                    name="alpha-name",
+                    detection_phrase="x",
+                    category="cat-alpha",
+                    expected_description="door-delay",
+                ),
+                document_id="doc-ui",
+                resolution=Resolution.RESOLVED,
+                status=CheckStatus.CONFIGURED,
+                evidence=(),
+                comparison_state=ComparisonState.SAME,
+                comparison_reason="",
+                review_reasons=(),
+                rule_revision="r1",
+            ),
+            _result("beta", status=CheckStatus.MISSING),
+        )
+        window = _window_with_results(qapp, results)
+        window._search_input.setText("cat-alpha")
+        assert window._result_list.count() == 1
+        window._search_input.setText("door-delay")
+        assert window._result_list.count() == 1
+        window._search_input.setText("beta")
+        assert window._result_list.count() == 1
+        window.close()
+
+    def test_no_visible_results_shows_empty_state(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._search_input.setText("zzz-no-match")
+        assert window._result_list.count() == 1
+        assert "无匹配" in window._result_list.item(0).text()
+        window.close()
+
+    def test_clear_search_resets(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        window._search_input.setText("zzz")
+        assert window._result_list.count() == 1
+        window._search_input.clear()
+        assert window._result_list.count() == 5
         window.close()
 
 

@@ -15,12 +15,14 @@ from design_requirement_checker.__main__ import main
 app = QApplication([])
 observed = []
 enabled_actions = []
+filter_labels = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"}
 def inspect_and_close():
     windows = [w for w in app.topLevelWidgets() if w.isVisible()]
     observed.extend(windows)
     for window in windows:
         enabled_actions.extend(
-            button for button in window.findChildren(QPushButton) if button.isEnabled()
+            button.text() for button in window.findChildren(QPushButton)
+            if button.isEnabled() and button.text() not in filter_labels
         )
         window.close()
     app.quit()
@@ -28,9 +30,7 @@ def inspect_and_close():
 QTimer.singleShot(100, inspect_and_close)
 assert main([]) == 0
 assert len(observed) == 1, "Startup must show one main window"
-assert [button.text() for button in enabled_actions] == [
-    "导入 DOCX"
-], "Only implemented operations may be enabled"
+assert enabled_actions == ["导入 DOCX"], "Only implemented operations may be enabled"
 """
     result = subprocess.run(
         [sys.executable, "-c", script],

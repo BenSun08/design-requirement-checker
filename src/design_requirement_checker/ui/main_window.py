@@ -22,7 +22,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, Qt, QThread
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -211,11 +211,27 @@ class MainWindow(QMainWindow):
         strip = QHBoxLayout()
         strip.addWidget(self._summary_label)
         strip.addWidget(self._warnings_label)
+        strip.addStretch()
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("搜索：编号 / 名称 / 类别 / 期望描述")
         self._search_input.setClearButtonEnabled(True)
+        self._search_input.textChanged.connect(self._populate_results)
         strip.addWidget(self._search_input)
         layout.addLayout(strip)
+
+        # Filter buttons.
+        self._current_filter = "全部"
+        self._filter_buttons: dict[str, QPushButton] = {}
+        filter_row = QHBoxLayout()
+        for name in ("全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"):
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setChecked(name == "全部")
+            btn.clicked.connect(lambda _checked=False, n=name: self._set_filter(n))
+            self._filter_buttons[name] = btn
+            filter_row.addWidget(btn)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
 
         # Result list (left) + detail (right).
         self._splitter = QSplitter()
@@ -230,6 +246,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._splitter, 1)
 
         self.setCentralWidget(central)
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._search_shortcut.activated.connect(self._search_input.setFocus)
         self.statusBar().showMessage("尚未导入文档")
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
@@ -320,12 +338,61 @@ class MainWindow(QMainWindow):
 
     def _populate_results(self) -> None:
         self._result_list.clear()
-        for result in self._order_results(self._results):
+        visible = self._filtered_results()
+        if not visible:
+            self._result_list.addItem("无匹配结果")
+            self._detail_view.clear()
+            return
+        for result in visible:
             item = result.check_item
             label = f"{item.code} · {item.name}"
             list_item = QListWidgetItem(label)
             list_item.setData(Qt.ItemDataRole.UserRole, result)
             self._result_list.addItem(list_item)
+
+    def _set_filter(self, name: str) -> None:
+        self._current_filter = name
+        for btn_name, btn in self._filter_buttons.items():
+            btn.setChecked(btn_name == name)
+        self._populate_results()
+
+    def _filtered_results(self) -> tuple[CheckResult, ...]:
+        """Apply active filter and search; never recomputes verification."""
+        results = list(self._order_results(self._results))
+        f = self._current_filter
+        if f == "已配置":
+            results = [r for r in results if r.status is CheckStatus.CONFIGURED]
+        elif f == "未配置":
+            results = [r for r in results if r.status is CheckStatus.MISSING]
+        elif f == "已划除":
+            results = [r for r in results if r.status is CheckStatus.STRUCK_OUT]
+        elif f == "待人工核查":
+            results = [r for r in results if r.resolution is Resolution.UNRESOLVED]
+        elif f == "仅异常":
+            results = [r for r in results if self._is_exception(r)]
+        query = self._search_input.text().strip().lower()
+        if query:
+            results = [r for r in results if self._matches_search(r, query)]
+        return tuple(results)
+
+    @staticmethod
+    def _is_exception(result: CheckResult) -> bool:
+        return (
+            result.status in (CheckStatus.MISSING, CheckStatus.STRUCK_OUT)
+            or result.resolution is Resolution.UNRESOLVED
+            or (
+                result.status is CheckStatus.CONFIGURED
+                and result.comparison_state is ComparisonState.DIFFERENT
+            )
+        )
+
+    @staticmethod
+    def _matches_search(result: CheckResult, query: str) -> bool:
+        item = result.check_item
+        haystack = " ".join(
+            (item.code, item.name, item.category, item.expected_description)
+        ).lower()
+        return query in haystack
 
     def _update_summary(self) -> None:
         if not self._results:
