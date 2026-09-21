@@ -5,11 +5,18 @@ with effective-strike formatting. Parsing stays outside widgets: the window
 only calls the application-layer import use case and renders the returned
 domain values. Verification, checklist management and background execution
 remain unimplemented and stay disabled.
+
+Task 4 adds an explicit UI lifecycle (UiState), an operation-generation token
+that prevents stale background outcomes from becoming current, and injected
+in-memory CheckItems. Background import/verification workers arrive in later
+Task 4 subtasks; the state transitions here are the foundation they build on.
 """
 
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -24,12 +31,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from design_requirement_checker.domain import Coverage, Document, DocumentLocation, TextRun
+from design_requirement_checker.domain import (
+    CheckItem,
+    CheckResult,
+    Coverage,
+    Document,
+    DocumentLocation,
+    TextRun,
+)
 
 if TYPE_CHECKING:
     from design_requirement_checker.application import ImportFailure
 
 _LEGEND = "图例：<s>删除线</s>＝已划线文本；〔…〕＝删除线状态未知；其余为未划线原文。"
+
+
+class UiState(Enum):
+    """UI lifecycle states driving action availability."""
+
+    EMPTY = "empty"
+    IMPORTING = "importing"
+    READY = "ready"
+    VERIFYING = "verifying"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 def format_location(location: DocumentLocation) -> str:
@@ -74,11 +100,19 @@ def format_blocks_html(document: Document) -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, check_items: Sequence[CheckItem] = ()) -> None:
         super().__init__()
         self.setWindowTitle("设计需求核查工具")
         self.resize(1100, 720)
         self.setMinimumSize(760, 480)
+
+        self._check_items: tuple[CheckItem, ...] = tuple(check_items)
+        self._document: Document | None = None
+        self._results: tuple[CheckResult, ...] = ()
+        self._state: UiState = UiState.EMPTY
+        #: Monotonic operation generation; workers complete only when their
+        #: generation still matches, so stale outcomes never become current.
+        self._op_generation: int = 0
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -93,19 +127,24 @@ class MainWindow(QMainWindow):
 
         notice = QLabel(
             "文档导入与查看已实现：选择 .docx 文件后显示文本块与删除线格式。"
-            "自动核查、检查项管理与后台执行尚未实现。"
+            "后台核查与检查项管理在后续任务中实现。"
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
 
         actions = QHBoxLayout()
-        import_button = QPushButton("导入 DOCX")
-        import_button.clicked.connect(self._on_import_clicked)
-        actions.addWidget(import_button)
-        for text in ("开始核查（待实现）", "检查项管理（待实现）"):
-            button = QPushButton(text)
-            button.setEnabled(False)
-            actions.addWidget(button)
+        self._import_button = QPushButton("导入 DOCX")
+        self._import_button.clicked.connect(self._on_import_clicked)
+        actions.addWidget(self._import_button)
+        self._run_button = QPushButton("开始核查")
+        self._run_button.setEnabled(False)
+        actions.addWidget(self._run_button)
+        self._cancel_button = QPushButton("取消核查")
+        self._cancel_button.setEnabled(False)
+        actions.addWidget(self._cancel_button)
+        self._manage_button = QPushButton("检查项管理")
+        self._manage_button.setEnabled(False)
+        actions.addWidget(self._manage_button)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -124,6 +163,78 @@ class MainWindow(QMainWindow):
         layout.addWidget(panel, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("尚未导入文档")
+        self._update_actions()
+
+    # --- public lifecycle API ----------------------------------------------
+
+    @property
+    def state(self) -> UiState:
+        return self._state
+
+    @property
+    def results(self) -> tuple[CheckResult, ...]:
+        return self._results
+
+    @property
+    def has_check_items(self) -> bool:
+        return bool(self._check_items)
+
+    def set_document(self, document: Document) -> None:
+        """Replace the current document; clears results and invalidates ops."""
+        self._op_generation += 1
+        self._document = document
+        self._results = ()
+        self._state = UiState.READY
+        self._show_document(document)
+        self._update_actions()
+
+    def start_verification(self) -> int:
+        """Begin a verification run; returns the operation generation token."""
+        self._op_generation += 1
+        self._state = UiState.VERIFYING
+        self._results = ()
+        self._update_actions()
+        return self._op_generation
+
+    def complete_verification(self, generation: int, results: Sequence[CheckResult]) -> bool:
+        """Apply results only if the generation is still current."""
+        if generation != self._op_generation:
+            return False
+        self._results = tuple(results)
+        self._state = UiState.COMPLETED
+        self._update_actions()
+        return True
+
+    def cancel_verification(self) -> None:
+        """Mark the run cancelled; results stay empty, never completed."""
+        self._state = UiState.CANCELLED
+        self._results = ()
+        self._update_actions()
+
+    def fail_verification(self, message: str) -> None:
+        """Mark the run failed; results stay empty, never completed."""
+        self._state = UiState.FAILED
+        self._results = ()
+        self.statusBar().showMessage(f"核查失败：{message}")
+        self._update_actions()
+
+    # --- action enablement --------------------------------------------------
+
+    def _update_actions(self) -> None:
+        s = self._state
+        self._import_button.setEnabled(s not in (UiState.IMPORTING, UiState.VERIFYING))
+        can_run = self._document is not None and self.has_check_items
+        runnable_states = (
+            UiState.READY,
+            UiState.COMPLETED,
+            UiState.CANCELLED,
+            UiState.FAILED,
+        )
+        self._run_button.setEnabled(can_run and s in runnable_states)
+        self._cancel_button.setEnabled(s in (UiState.IMPORTING, UiState.VERIFYING))
+        self._manage_button.setEnabled(False)
+
+    # --- import (synchronous until Task 4.2 moves it off the UI thread) ----
 
     def _on_import_clicked(self) -> None:
         # Deferred import keeps startup composition free of document adapters.
@@ -143,7 +254,7 @@ class MainWindow(QMainWindow):
         if isinstance(outcome, ImportFailure):
             self._show_failure(outcome)
         else:
-            self._show_document(outcome)
+            self.set_document(outcome)
 
     def _show_document(self, document: Document) -> None:
         if document.coverage is Coverage.COMPLETE:
@@ -167,6 +278,9 @@ class MainWindow(QMainWindow):
         )
 
     def _show_failure(self, failure: ImportFailure) -> None:
+        self._document = None
+        self._results = ()
+        self._state = UiState.FAILED
         self._summary_label.setText(f"导入失败：{failure.filename}")
         self._warnings_label.setText("")
         self._warnings_label.setVisible(False)
@@ -175,3 +289,4 @@ class MainWindow(QMainWindow):
             f"<p>{html.escape(failure.detail)}</p>"
         )
         self.statusBar().showMessage(f"导入失败：{failure.filename}")
+        self._update_actions()

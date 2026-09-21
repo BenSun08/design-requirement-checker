@@ -15,14 +15,69 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from design_requirement_checker.application import ImportFailure, import_document
 from design_requirement_checker.domain import (
     BlockType,
+    CheckItem,
+    Coverage,
+    Document,
+    DocumentBlock,
     DocumentLocation,
     TableCellCoordinates,
+    TextRun,
 )
 from design_requirement_checker.ui.main_window import (
     MainWindow,
+    UiState,
     format_blocks_html,
     format_location,
 )
+
+
+def _run(text: str, strike: bool | None = False) -> TextRun:
+    return TextRun(
+        text=text,
+        start_offset=0,
+        end_offset=len(text),
+        effective_strike=strike,
+        strike_origin="run-direct" if strike is not None else "default-off",
+        strike_reason="" if strike is not None else "test-unknown-formatting",
+    )
+
+
+def _block(block_id: str, text: str) -> DocumentBlock:
+    para_index = int(block_id.removeprefix("body:p"))
+    location = DocumentLocation(
+        document_id="doc-ui",
+        block_id=block_id,
+        block_type=BlockType.PARAGRAPH,
+        part="body",
+        paragraph_index=para_index,
+    )
+    return DocumentBlock(
+        block_id=block_id,
+        block_type=BlockType.PARAGRAPH,
+        text=text,
+        runs=(_run(text),),
+        location=location,
+    )
+
+
+def _document(*blocks: DocumentBlock) -> Document:
+    return Document(
+        document_id="doc-ui",
+        filename="ui.docx",
+        content_fingerprint="ui-fingerprint",
+        blocks=blocks,
+        coverage=Coverage.COMPLETE,
+    )
+
+
+def _item(item_id: str = "a", phrase: str = "功能") -> CheckItem:
+    return CheckItem(
+        item_id=item_id,
+        code=item_id.upper(),
+        name=f"name-{item_id}",
+        detection_phrase=phrase,
+        aliases=(),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +98,100 @@ class TestEnabledActions:
         ]
         window.close()
         assert enabled == ["导入 DOCX"]
-        assert "开始核查（待实现）" in disabled
-        assert "检查项管理（待实现）" in disabled
+        assert "开始核查" in disabled
+        assert "检查项管理" in disabled
+
+
+class TestUiLifecycle:
+    def test_initial_state_is_empty_with_run_disabled(self, qapp) -> None:
+        window = MainWindow()
+        assert window.state is UiState.EMPTY
+        assert window._run_button.isEnabled() is False
+        assert window._cancel_button.isEnabled() is False
+        window.close()
+
+    def test_document_ready_enables_run_only_with_check_items(self, qapp) -> None:
+        no_items = MainWindow(check_items=())
+        no_items.set_document(_document(_block("body:p0", "内容")))
+        assert no_items.state is UiState.READY
+        assert no_items._run_button.isEnabled() is False
+        no_items.close()
+
+        with_items = MainWindow(check_items=(_item(),))
+        with_items.set_document(_document(_block("body:p0", "内容")))
+        assert with_items.state is UiState.READY
+        assert with_items._run_button.isEnabled() is True
+        with_items.close()
+
+    def test_verifying_state_disables_run_and_enables_cancel(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(_document(_block("body:p0", "内容")))
+        generation = window.start_verification()
+        assert generation == window._op_generation
+        assert window.state is UiState.VERIFYING
+        assert window._run_button.isEnabled() is False
+        assert window._cancel_button.isEnabled() is True
+        window.close()
+
+    def test_complete_with_matching_generation_applies_results(self, qapp) -> None:
+        from design_requirement_checker.matching import verify
+
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        generation = window.start_verification()
+        results = verify(document, (_item(),))
+        applied = window.complete_verification(generation, results)
+        assert applied is True
+        assert window.state is UiState.COMPLETED
+        assert len(window.results) == 1
+        window.close()
+
+    def test_stale_completion_is_ignored(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(_document(_block("body:p0", "内容")))
+        stale_generation = window.start_verification()
+        # A newer operation (new document) invalidates the running one.
+        window.set_document(_document(_block("body:p0", "其他")))
+        applied = window.complete_verification(stale_generation, ())
+        assert applied is False
+        assert window.state is UiState.READY
+        assert window.results == ()
+        window.close()
+
+    def test_cancellation_is_not_completed_and_clears_results(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(_document(_block("body:p0", "内容")))
+        window.start_verification()
+        window.cancel_verification()
+        assert window.state is not UiState.COMPLETED
+        assert window.results == ()
+        assert window._cancel_button.isEnabled() is False
+        window.close()
+
+    def test_failure_is_not_completed(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(_document(_block("body:p0", "内容")))
+        window.start_verification()
+        window.fail_verification("boom")
+        assert window.state is UiState.FAILED
+        assert window.state is not UiState.COMPLETED
+        assert window.results == ()
+        window.close()
+
+    def test_new_document_clears_existing_results(self, qapp) -> None:
+        from design_requirement_checker.matching import verify
+
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        generation = window.start_verification()
+        window.complete_verification(generation, verify(document, (_item(),)))
+        assert window.state is UiState.COMPLETED
+        window.set_document(_document(_block("body:p0", "其他")))
+        assert window.state is UiState.READY
+        assert window.results == ()
+        window.close()
 
 
 class TestPureFormatting:
