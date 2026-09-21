@@ -239,56 +239,70 @@ def _association_blocker(
     return ""
 
 
-def _collect_block(
-    items: Sequence[CheckItem], block: DocumentBlock, block_index: int
-) -> list[_Occurrence]:
-    norm = normalize(block.text)
+def _collect_candidates(item: CheckItem, norm: NormalizedText, raw_text: str) -> list[_Candidate]:
+    """Candidate search for one item against a normalized block.
 
-    # Candidate collection: one entry per (item, raw span), keeping the best
-    # match method (exact → normalized → alias) for reporting.
+    This is the per-item matching unit: each call follows its own cancellation
+    checkpoint in ``verify``. Returns one candidate per (item, raw span),
+    keeping the best match method (exact → normalized → alias).
+    """
     best: dict[tuple[str, tuple[int, int]], _Candidate] = {}
-    for item in items:
-        terms: list[tuple[str, str, MatchType]] = [(item.detection_phrase, "", MatchType.EXACT)]
-        terms.extend((alias.text, alias.alias_id, MatchType.ALIAS) for alias in item.aliases)
-        for term, alias_id, configured_type in terms:
-            term_norm = normalize(term).text
-            for norm_start, norm_end in _find_all(norm.text, term_norm):
-                raw_span = map_span(norm, norm_start, norm_end)
-                if configured_type is MatchType.ALIAS:
-                    match_type = MatchType.ALIAS
-                elif block.text[raw_span[0] : raw_span[1]] == term:
-                    match_type = MatchType.EXACT
-                else:
-                    match_type = MatchType.NORMALIZED
-                candidate = _Candidate(item, term, alias_id, match_type, (norm_start, norm_end))
-                key = (item.item_id, raw_span)
-                current = best.get(key)
-                if current is None or _TYPE_RANK[match_type] < _TYPE_RANK[current.match_type]:
-                    best[key] = candidate
+    terms: list[tuple[str, str, MatchType]] = [(item.detection_phrase, "", MatchType.EXACT)]
+    terms.extend((alias.text, alias.alias_id, MatchType.ALIAS) for alias in item.aliases)
+    for term, alias_id, configured_type in terms:
+        term_norm = normalize(term).text
+        for norm_start, norm_end in _find_all(norm.text, term_norm):
+            raw_span = map_span(norm, norm_start, norm_end)
+            if configured_type is MatchType.ALIAS:
+                match_type = MatchType.ALIAS
+            elif raw_text[raw_span[0] : raw_span[1]] == term:
+                match_type = MatchType.EXACT
+            else:
+                match_type = MatchType.NORMALIZED
+            candidate = _Candidate(item, term, alias_id, match_type, (norm_start, norm_end))
+            key = (item.item_id, raw_span)
+            current = best.get(key)
+            if current is None or _TYPE_RANK[match_type] < _TYPE_RANK[current.match_type]:
+                best[key] = candidate
+    return list(best.values())
 
-    ordered = sorted(best.items(), key=lambda pair: (pair[0][1], pair[1].term))
+
+def _associate_candidates(
+    candidates: Sequence[_Candidate],
+    norm: NormalizedText,
+    block: DocumentBlock,
+    block_index: int,
+) -> list[_Occurrence]:
+    """Cross-item ambiguity, requirement-span association and evidence values.
+
+    Runs after every item's candidates for the block have been collected, so
+    overlapping phrases across items can be detected. Ordering follows the raw
+    span (via the equivalent normalized span) then term text.
+    """
+    ordered = sorted(candidates, key=lambda c: (c.norm_span, c.term))
 
     # Ambiguity: one raw span claimed by different term texts across items —
     # the text cannot safely establish which function identity applies.
     # Identical term texts on several items are a baseline-validation (Task 5)
     # configuration defect, not verification ambiguity.
     ambiguous: set[tuple[str, tuple[int, int]]] = set()
-    for i, (left_key, left) in enumerate(ordered):
-        for right_key, right in ordered[i + 1 :]:
-            if left_key[0] == right_key[0] or left.term == right.term:
+    for i, left in enumerate(ordered):
+        for right in ordered[i + 1 :]:
+            if left.item.item_id == right.item.item_id or left.term == right.term:
                 continue
-            left_start, left_end = left_key[1]
-            right_start, right_end = right_key[1]
-            if left_start < right_end and right_start < left_end:
-                ambiguous.add(left_key)
-                ambiguous.add(right_key)
+            left_raw = map_span(norm, left.norm_span[0], left.norm_span[1])
+            right_raw = map_span(norm, right.norm_span[0], right.norm_span[1])
+            if left_raw[0] < right_raw[1] and right_raw[0] < left_raw[1]:
+                ambiguous.add((left.item.item_id, left_raw))
+                ambiguous.add((right.item.item_id, right_raw))
 
     # Requirement-span association: forward only, to the earliest boundary
     # delimiter, next qualifying match start or block end (S6 rule).
-    match_starts = [candidate.norm_span[0] for _, candidate in ordered]
+    match_starts = [candidate.norm_span[0] for candidate in ordered]
     occurrences: list[_Occurrence] = []
-    for (item_id, raw_span), candidate in ordered:
+    for candidate in ordered:
         norm_start, norm_end = candidate.norm_span
+        raw_span = map_span(norm, norm_start, norm_end)
         end = len(norm.text)
         k = norm_end
         while k < len(norm.text):
@@ -300,6 +314,10 @@ def _collect_block(
             if norm_end <= other_start < end:
                 end = other_start
         requirement_text = norm.text[norm_start:end]
+        raw_requirement_span = (
+            norm.char_sources[norm_start][0],
+            norm.char_sources[end - 1][1],
+        )
         transformations = (
             ()
             if candidate.match_type is MatchType.EXACT
@@ -320,23 +338,14 @@ def _collect_block(
                 transformations=transformations,
                 raw_match_span=raw_span,
                 norm_span=candidate.norm_span,
-                raw_requirement_span=(
-                    norm.char_sources[norm_start][0],
-                    norm.char_sources[end - 1][1],
-                ),
+                raw_requirement_span=raw_requirement_span,
                 requirement_text=requirement_text,
-                strike_coverage=_strike_coverage(
-                    block,
-                    (
-                        norm.char_sources[norm_start][0],
-                        norm.char_sources[end - 1][1],
-                    ),
-                ),
+                strike_coverage=_strike_coverage(block, raw_requirement_span),
                 value_tokens=_value_tokens(requirement_text),
                 comparison_blocker=_association_blocker(
                     candidate.item, norm.text, candidate.norm_span, end
                 ),
-                ambiguous=(item_id, raw_span) in ambiguous,
+                ambiguous=(candidate.item.item_id, raw_span) in ambiguous,
             )
         )
     return occurrences
@@ -472,17 +481,22 @@ def verify(
 ) -> tuple[CheckResult, ...]:
     """Run the deterministic rules over the document for the given items.
 
-    A cancellation checkpoint is evaluated once per (item, block) pair before
-    that pair's evidence is collected; a True flag raises VerificationCancelled
-    so no partial result list can masquerade as a completed run. Results follow
-    input item order; evidence keeps stable source order (block, then span).
+    A cancellation checkpoint is evaluated once per (item, block) pair
+    immediately before that item's candidate search; a True flag raises
+    VerificationCancelled so no partial result list can masquerade as a
+    completed run. Cross-item ambiguity and requirement-span association run
+    after all items' candidates for a block are collected. Results follow input
+    item order; evidence keeps stable source order (block, then span).
     """
     by_item: dict[str, list[_Occurrence]] = {item.item_id: [] for item in check_items}
     for block_index, block in enumerate(document.blocks):
+        norm = normalize(block.text)
+        candidates: list[_Candidate] = []
         for item in check_items:
             if cancel_check is not None and cancel_check():
                 raise VerificationCancelled("verification cancelled at a checkpoint")
-        for occurrence in _collect_block(check_items, block, block_index):
+            candidates.extend(_collect_candidates(item, norm, block.text))
+        for occurrence in _associate_candidates(candidates, norm, block, block_index):
             by_item[occurrence.item.item_id].append(occurrence)
     results: list[CheckResult] = []
     for item in check_items:

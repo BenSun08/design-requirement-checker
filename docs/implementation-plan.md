@@ -58,6 +58,12 @@ synthetic-DOCX → ingestion → verification composition test; no fuzzy/semanti
 matching, no confidence scores, no fourth status, no Task 4 UI or Task 5
 persistence was pulled forward.
 
+**2026-09-21 remediation:** Task 3 cancellation checkpoint semantics remediated.
+The checkpoint now occurs immediately before each (CheckItem, block) candidate
+search rather than in a batch ahead of the matching work; cross-item ambiguity
+and requirement-span association still run after all of a block's candidates
+are collected. No matching policy changed. 246 tests pass.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
