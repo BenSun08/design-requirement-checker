@@ -1195,6 +1195,74 @@ class TestLimitedCoverage:
         window.close()
 
 
+class TestKeyboardNavigation:
+    def test_down_arrow_moves_selection(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        document = _document(_block("body:p0", "x"))
+        results = (
+            _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),)),
+            _result_with_evidence("b", status=CheckStatus.MISSING),
+            _result_with_evidence("c", status=CheckStatus.STRUCK_OUT, evidence=(_evidence(),)),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window.complete_verification(window._op_generation, results)
+        window._result_list.setCurrentRow(0)
+        QTest.keyClick(window._result_list, Qt.Key_Down)
+        assert window._result_list.currentRow() == 1
+        window.close()
+
+    def test_up_arrow_moves_selection(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        document = _document(_block("body:p0", "x"))
+        results = (
+            _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),)),
+            _result_with_evidence("b", status=CheckStatus.MISSING),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window.complete_verification(window._op_generation, results)
+        window._result_list.setCurrentRow(1)
+        QTest.keyClick(window._result_list, Qt.Key_Up)
+        assert window._result_list.currentRow() == 0
+        window.close()
+
+    def test_enter_activates_result(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        document = _document(_block("body:p0", "x"))
+        results = (
+            _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),)),
+            _result_with_evidence("b", status=CheckStatus.MISSING),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window.complete_verification(window._op_generation, results)
+        # Ordering: MISSING (b) is row 0, CONFIGURED (a) is row 1.
+        window._result_list.setCurrentRow(1)
+        QTest.keyClick(window._result_list, Qt.Key_Return)
+        assert "已配置" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_ctrl_f_focuses_search(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        window = MainWindow(check_items=(_item(),))
+        window.show()
+        window._result_list.setFocus()
+        qapp.processEvents()
+        QTest.keyClick(window, Qt.Key_F, Qt.ControlModifier)
+        qapp.processEvents()
+        assert window._search_input.hasFocus()
+        window.close()
+
+
 class TestPureFormatting:
     def test_body_location_is_one_based(self) -> None:
         location = DocumentLocation(
