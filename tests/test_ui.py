@@ -523,6 +523,95 @@ class TestBackgroundVerification:
         window.close()
 
 
+class TestWorkerFailure:
+    def test_import_worker_emits_failed_on_exception(self, qapp, monkeypatch) -> None:
+        import design_requirement_checker.application as app_mod
+
+        def boom(_path):
+            raise RuntimeError("parser exploded")
+
+        monkeypatch.setattr(app_mod, "import_document", boom)
+        from design_requirement_checker.ui.workers import ImportWorker
+
+        worker = ImportWorker("/fake.docx", 3)
+        received: list[tuple[str, str, int]] = []
+        worker.failed.connect(lambda c, d, g: received.append((c, d, g)))
+        worker.run()
+        assert len(received) == 1
+        category, detail, generation = received[0]
+        assert category == "import-error"
+        assert "parser exploded" in detail
+        assert generation == 3
+        # Full traceback must not leak into the detail string.
+        assert "Traceback" not in detail
+
+    def test_verification_worker_emits_failed_on_exception(self, qapp, monkeypatch) -> None:
+        import design_requirement_checker.application as app_mod
+
+        def boom(_doc, _items, cancel_check=None):
+            raise RuntimeError("matcher exploded")
+
+        monkeypatch.setattr(app_mod, "verify_document", boom)
+        from design_requirement_checker.ui.workers import VerificationWorker
+
+        document = _document(_block("body:p0", "功能"))
+        cancel = threading.Event()
+        worker = VerificationWorker(document, (_item(),), cancel, 5)
+        received: list[tuple[str, str, int]] = []
+        worker.failed.connect(lambda c, d, g: received.append((c, d, g)))
+        worker.run()
+        assert len(received) == 1
+        category, detail, generation = received[0]
+        assert category == "verification-error"
+        assert "matcher exploded" in detail
+        assert generation == 5
+        assert "Traceback" not in detail
+
+    def test_import_exception_drives_ui_failed_state(self, qapp, monkeypatch) -> None:
+        import design_requirement_checker.application as app_mod
+
+        def boom(_path):
+            raise RuntimeError("cannot read")
+
+        monkeypatch.setattr(app_mod, "import_document", boom)
+        window = MainWindow()
+        window._start_import("/fake.docx")
+        assert _process_until(qapp, lambda: window.state is UiState.FAILED)
+        assert window._progress.isVisible() is False
+        assert window.results == ()
+        # Thread must have terminated (no longer running).
+        assert window._thread is None or not window._thread.isRunning()
+        window.close()
+
+    def test_verification_exception_drives_ui_failed_state(self, qapp, monkeypatch) -> None:
+        import design_requirement_checker.application as app_mod
+
+        def boom(_doc, _items, cancel_check=None):
+            raise RuntimeError("matcher broken")
+
+        monkeypatch.setattr(app_mod, "verify_document", boom)
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._on_run_clicked()
+        assert _process_until(qapp, lambda: window.state is UiState.FAILED)
+        assert window._progress.isVisible() is False
+        assert window.results == ()
+        assert window._thread is None or not window._thread.isRunning()
+        window.close()
+
+    def test_import_failure_is_not_treated_as_worker_exception(self, qapp) -> None:
+        """An expected ImportFailure stays on the normal finished path."""
+        window = MainWindow()
+        window._op_generation = 1
+        window._state = UiState.IMPORTING
+        failure = ImportFailure("broken.docx", "file-access-error", "denied")
+        applied = window._on_import_finished(failure, 1)
+        assert applied is True
+        assert window.state is UiState.FAILED
+        window.close()
+
+
 class TestReviewWorkspaceShell:
     def test_workspace_has_splitter_with_result_and_detail_panels(self, qapp) -> None:
         from PySide6.QtWidgets import QListWidget, QSplitter, QTextBrowser

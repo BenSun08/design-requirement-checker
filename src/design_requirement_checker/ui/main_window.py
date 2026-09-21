@@ -647,7 +647,9 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_import_finished)
+        self._worker.failed.connect(self._on_worker_failed)
         self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(
@@ -696,7 +698,9 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_verification_finished)
+        self._worker.failed.connect(self._on_worker_failed)
         self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(
@@ -732,6 +736,25 @@ class MainWindow(QMainWindow):
             self.complete_verification(generation, outcome.results)
         else:  # VerificationState.FAILED
             self.fail_verification("verification failed")
+        return True
+
+    def _on_worker_failed(self, category: str, detail: str, generation: int) -> bool:
+        """Handle an unexpected worker exception; never shows partial results."""
+        if self._closing or generation != self._op_generation:
+            return False
+        self._progress.setVisible(False)
+        self._thread = None
+        self._worker = None
+        if category == "import-error":
+            self._state = UiState.FAILED
+            self._document = None
+            self._results = ()
+            self._summary_label.setText("导入失败：出现意外错误")
+            self._detail_view.setHtml(f"<p>无法读取所选文件：{html.escape(detail)}</p>")
+            self.statusBar().showMessage("导入失败")
+            self._update_actions()
+        else:
+            self.fail_verification(detail)
         return True
 
     def _show_document(self, document: Document) -> None:
