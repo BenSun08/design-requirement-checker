@@ -698,6 +698,189 @@ class TestWorkerFailure:
         window.close()
 
 
+class TestDeferredClose:
+    """close must never be accepted while any QThread is still running."""
+
+    def test_long_running_import_defers_close_until_thread_finishes(
+        self, qapp, tmp_path, monkeypatch
+    ) -> None:
+        """Section A: close during a blocking import must be deferred."""
+        import design_requirement_checker.application as app_mod
+
+        path_a = str(tmp_path / "a.docx")
+        release = threading.Event()
+
+        def fake_import(path):
+            if path == path_a:
+                release.wait(timeout=5)
+                return import_document(path)
+            return import_document(path)
+
+        monkeypatch.setattr(app_mod, "import_document", fake_import)
+
+        window = MainWindow()
+        window.show()
+        window._start_import(path_a)
+        thread = window._thread
+        assert thread is not None
+        # Let the worker actually enter import_document before testing close.
+        time.sleep(0.1)
+        qapp.processEvents()
+        assert thread.isRunning()
+
+        # FIRST close attempt: must be ignored because thread is running.
+        window.close()
+        assert window.isVisible(), "window must stay alive while thread runs"
+        assert window._close_requested is True
+        assert thread in window._active_threads
+
+        # Release the import and let its thread finish via direct-connection quit.
+        release.set()
+        # Wait for thread exit with GIL-releasing poll.
+        deadline = time.time() + 5.0
+        while thread.isRunning() and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.02)
+        assert not thread.isRunning()
+        # Drain thread.finished which triggers _on_thread_finished → deferred close retry.
+        assert _process_until(qapp, lambda: not window.isVisible(), timeout_ms=2000)
+        assert window._active_threads == []
+
+    def test_close_during_verification_sets_cancel_and_defers(self, qapp, monkeypatch) -> None:
+        """Section B: close during verification sets cooperative cancel and
+        defers the actual close until the worker terminates."""
+        import design_requirement_checker.application as app_mod
+
+        release = threading.Event()
+
+        def fake_verify(doc, items, cancel_check=None):
+            # Cooperative: check cancel each tick.
+            for _ in range(20):
+                if cancel_check is not None and cancel_check():
+                    break
+                time.sleep(0.05)
+            else:
+                release.wait(timeout=5)
+            from design_requirement_checker.matching import _completed_outcome
+
+            return _completed_outcome(doc)
+
+        monkeypatch.setattr(app_mod, "verify_document", fake_verify)
+
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window.show()
+        window._on_run_clicked()
+        thread = window._thread
+        assert thread is not None
+        time.sleep(0.1)
+        qapp.processEvents()
+        assert thread.isRunning()
+
+        FIRST_CANCEL_EVENT = window._cancel_event
+
+        window.close()
+        assert window.isVisible(), "window must defer close while thread runs"
+        # Cooperative cancellation was set before quit.
+        assert FIRST_CANCEL_EVENT.is_set()
+        assert window._close_requested is True
+
+        # Worker should see cancel and exit promptly without needing release.
+        assert _process_until(qapp, lambda: not window.isVisible(), timeout_ms=4000)
+        assert window._active_threads == []
+        assert thread not in window._thread_for_generation.values()
+
+    def test_close_without_running_workers_accepts_immediately(self, qapp) -> None:
+        """Section C: close with no active workers behaves normally."""
+        window = MainWindow()
+        window.show()
+        window.close()
+        assert not window.isVisible()
+        # Close request was set; that's fine for a window being torn down.
+        assert window._close_requested is True
+
+    def test_last_running_thread_triggers_final_close(self, qapp) -> None:
+        """Section D: with two owned threads where only one remains running,
+        the window stays pending-close until that last thread exits."""
+        from PySide6.QtCore import QThread
+
+        window = MainWindow()
+        window.show()
+
+        # Simulate two owned threads, one finished, one still running.
+        t_done = QThread()
+        t_done.start()
+        t_done.quit()
+        assert t_done.wait(2000)
+        # Clean up the finished thread's bookkeeping as if its handler ran.
+        window._on_thread_finished(t_done)
+
+        t_alive = QThread()
+        t_alive.start()
+        t_alive.finished.connect(lambda th=t_alive: window._on_thread_finished(th))
+        window._active_threads = [t_alive]
+        window._close_requested = True
+
+        # closeEvent should ignore because t_alive is still running.
+        window.close()
+        assert window.isVisible()
+        assert t_alive.isRunning()
+
+        # Now t_alive finishes; its finished signal fires _on_thread_finished.
+        t_alive.quit()
+        assert t_alive.wait(2000)
+        qapp.processEvents()
+        # With no threads left and close_requested, the deferred retry should
+        # accept and the window disappears.
+        assert _process_until(qapp, lambda: not window.isVisible(), timeout_ms=2000)
+
+    def test_final_cleanup_removes_thread_from_all_ownership_structures(
+        self, qapp, tmp_path, monkeypatch
+    ) -> None:
+        """Section E: after final worker completion, no ownership structure
+        holds a reference to the finished thread."""
+        import design_requirement_checker.application as app_mod
+
+        path_a = str(tmp_path / "a.docx")
+        release = threading.Event()
+
+        def fake_import(path):
+            if path == path_a:
+                release.wait(timeout=5)
+                return import_document(path)
+            return import_document(path)
+
+        monkeypatch.setattr(app_mod, "import_document", fake_import)
+
+        window = MainWindow()
+        window._start_import(path_a)
+        thread = window._thread
+        assert thread is not None
+        gen = [g for g, t in window._thread_for_generation.items() if t is thread]
+        assert gen, "thread must be registered in _thread_for_generation"
+
+        # Trigger close request while still running.
+        window.show()
+        window.close()
+        assert window._close_requested is True
+
+        # Finish the worker, let close retry.
+        release.set()
+        deadline = time.time() + 5.0
+        while thread.isRunning() and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.02)
+        assert not thread.isRunning()
+        assert _process_until(qapp, lambda: not window.isVisible(), timeout_ms=2000)
+
+        # All ownership structures must be clean for this thread.
+        assert thread not in window._active_threads
+        assert thread not in window._thread_for_generation.values()
+        assert window._thread_for_generation == {}
+        assert window._active_threads == []
+
+
 class TestReviewWorkspaceShell:
     def test_workspace_has_splitter_with_result_and_detail_panels(self, qapp) -> None:
         from PySide6.QtWidgets import QListWidget, QSplitter, QTextBrowser

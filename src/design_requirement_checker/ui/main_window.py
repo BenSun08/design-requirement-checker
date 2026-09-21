@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, Qt, QThread, QUrl
+from PySide6.QtCore import QCoreApplication, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -329,41 +329,49 @@ class MainWindow(QMainWindow):
         #: still quit exactly its own thread without touching current refs.
         self._thread_for_generation: dict[int, QThread] = {}
         self._cancel_event: threading.Event | None = None
-        self._closing = False
+        self._close_requested = False
         self._detail_result: CheckResult | None = None
         self._evidence_index: int = 0
         self._update_actions()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._closing = True
-        self._stop_worker()
-        super().closeEvent(event)
+        """Never accept close while any owned QThread is still running.
 
-    def _stop_worker(self) -> None:
-        """Quit every running background thread; retain ownership of any thread
-        that has not yet finished so it is never destroyed while running.
-
-        For verification workers the cooperative cancel event is set first so
-        matching stops promptly. Import workers have no cooperative cancel;
-        they are simply told to quit and, if still running after a brief wait,
-        retained (never destroyed) until they finish on their own.
+        Cooperative verification cancellation is requested before quit; import
+        has no cooperative cancel so we simply ask its thread to quit its
+        event loop. If any thread is still alive we ignore the close and rely
+        on _on_thread_finished scheduling a deferred retry when the last thread
+        exits. No processEvents() pumping from inside closeEvent.
         """
+        self._close_requested = True
         # Cooperative cancellation for verification work (Task 3).
         if self._cancel_event is not None:
             self._cancel_event.set()
-        finished_threads: list[QThread] = []
+        # Ask each thread to quit its event loop. quit() is thread-safe; the
+        # worker thread stops its own event loop via DirectConnection.
         for thread in list(self._active_threads):
             thread.quit()
-            if thread.wait(2000):
-                finished_threads.append(thread)
-        # Only release threads that actually finished; keep the rest owned so
-        # their C++ object is not destroyed while the OS thread is still alive.
-        for thread in finished_threads:
-            if thread in self._active_threads:
-                self._active_threads.remove(thread)
+        # If any thread is still actually running (import has no cooperative
+        # cancel, quit() only affects the event loop, not the currently
+        # executing import_document call), defer the close.
+        if any(t.isRunning() for t in self._active_threads):
+            event.ignore()
+            return
+        event.accept()
+
+    def _stop_worker(self) -> None:
+        """Legacy single-shot shutdown; kept only for any direct calls.
+
+        Prefer closeEvent's deferred-close path for normal termination — it
+        never blocks the UI thread indefinitely and guarantees no running
+        thread outlives the window.
+        """
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        for thread in list(self._active_threads):
+            thread.quit()
         self._thread = None
         self._worker = None
-        # Drain queued worker-finished signals so they don't fire after close.
         QCoreApplication.processEvents()
 
     # --- public lifecycle API ----------------------------------------------
@@ -498,7 +506,7 @@ class MainWindow(QMainWindow):
     def _on_result_selected(
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
     ) -> None:
-        if self._closing or current is None:
+        if self._close_requested or current is None:
             return
         result = current.data(Qt.ItemDataRole.UserRole)
         if isinstance(result, CheckResult):
@@ -716,9 +724,23 @@ class MainWindow(QMainWindow):
         self._active_threads.append(thread)
 
     def _on_thread_finished(self, thread: QThread) -> None:
-        """Remove exactly the thread that finished from the active set."""
+        """Remove exactly the thread that finished from every ownership
+        structure, by identity so stale-generation handlers can't block cleanup.
+
+        After cleanup, if a deferred close is pending and no threads remain,
+        schedule a non-reentrant close retry on the UI event loop.
+        """
         if thread in self._active_threads:
             self._active_threads.remove(thread)
+        # Clean thread_for_generation by identity in case the generation-based
+        # pop was already consumed by a stale handler path.
+        dead = [g for g, t in self._thread_for_generation.items() if t is thread]
+        for g in dead:
+            self._thread_for_generation.pop(g, None)
+        if self._close_requested and not self._active_threads:
+            # Non-reentrant: don't call self.close() directly from inside a
+            # signal handler that itself is fired from QThread.finished.
+            QTimer.singleShot(0, self.close)
 
     def _finish_operation(self, generation: int) -> None:
         """Quit and forget the thread owned by one operation generation.
@@ -737,7 +759,7 @@ class MainWindow(QMainWindow):
     def _on_import_finished(self, outcome: Document | ImportFailure, generation: int) -> bool:
         """Apply the import outcome only if its generation is still current."""
         self._finish_operation(generation)
-        if self._closing or generation != self._op_generation:
+        if self._close_requested or generation != self._op_generation:
             return False
         self._progress.setVisible(False)
         self.show_import_outcome(outcome)
@@ -782,7 +804,7 @@ class MainWindow(QMainWindow):
         current) are discarded. A cancelled run never carries results.
         """
         self._finish_operation(generation)
-        if self._closing or generation != self._op_generation:
+        if self._close_requested or generation != self._op_generation:
             return False
         if self._document is None or outcome.document_id != self._document.document_id:
             return False
@@ -798,7 +820,7 @@ class MainWindow(QMainWindow):
     def _on_worker_failed(self, category: str, detail: str, generation: int) -> bool:
         """Handle an unexpected worker exception; never shows partial results."""
         self._finish_operation(generation)
-        if self._closing or generation != self._op_generation:
+        if self._close_requested or generation != self._op_generation:
             return False
         self._progress.setVisible(False)
         if category == "import-error":
