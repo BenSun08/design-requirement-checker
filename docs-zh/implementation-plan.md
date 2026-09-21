@@ -50,6 +50,32 @@ Resolution、ComparisonState、MatchType、StrikeCoverage、MatchEvidence）与
 歧义与要求范围关联仍在该块所有候选收集完毕后运行。未更改任何匹配策略。
 246 项测试通过。
 
+**2026-09-21 执行记录：** Task 4（Qt 审查工作区）已在分支
+`task4-qt-review-workspace` 上以 13 个可审查子任务执行。MainWindow 现拥有
+显式 `UiState` 生命周期（EMPTY / IMPORTING / READY / VERIFYING / COMPLETED /
+CANCELLED / FAILED）驱动操作可用性，并以单调递增的操作代数 token 使过期
+worker 结果失效。DOCX 导入与 `verify_document` 通过小型 QObject worker 在
+专用 QThread 上脱离 UI 线程运行；取消使用现有 application 回调。工作区外壳
+为 QSplitter（结果列表＋详情），上方为标题／工具栏、汇总＋搜索条与持久
+状态／页脚。完成的运行显示汇总计数（total = configured + missing +
+struck_out + unresolved；DIFFERENT 正交）与优先级排序
+（UNRESOLVED → MISSING → STRUCK_OUT → CONFIGURED+DIFFERENT → 其余
+CONFIGURED）。筛选（全部/已配置/未配置/已划除/待人工核查/仅异常）与搜索
+（code/name/category/expected/description）基于缓存结果集操作，不重新计算
+核查。详情面板呈现状态、比较状态、预期/实际、匹配方式、审查原因
+（UNRESOLVED 原因 token 仅在 UI 层映射为中文）、按状态呈现
+（MISSING 显示限定范围的提示且不虚构证据；STRUCK_OUT 显示删除线样式与
+文字状态；NOT_COMPARED 显示可读原因）、多证据选择器，以及重建的前/当前/
+后块源文本上下文并高亮要求范围。LIMITED 覆盖显示持久的"检查范围受限"
+提示，在筛选与详情导航后仍然可见。支持键盘导航（Up/Down/Enter、Ctrl+F）。
+matching.py 与 domain.py 保持无 Qt；CheckItems 通过构造函数注入
+（`Sequence[CheckItem]`，默认空 → 尚未加载检查项，运行禁用）。未引入持久化、
+清单编辑器、Task 5、HTTP/sidecar 或通用任务框架。317 项测试通过
+（test_ui.py 96 项）；ruff check、ruff format --check、mypy（严格）、
+pip check 与 git diff --check 本地全部通过。一次全量 pytest 在关闭已启动
+后台线程的窗口期间间歇段错误；`_closing` 守卫与 `_stop_worker` 中的
+`processEvents()` 排空使其在多次运行中不可复现，但仍为 CI 观察项。
+
 [English source](../docs/implementation-plan.md)
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。
@@ -158,12 +184,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 **文件：**ui/main_window.py、application.py；tests/test_ui.py、tests/test_application.py。
 
-- [ ] 实现导入／运行／进度／取消、汇总、状态／待核查筛选、仅异常和搜索。
-- [ ] 列表／详情支持预期／实际、全部出现位置、删除线范围、相邻上下文。
-- [ ] 持续显示 LIMITED，MISSING 文案限定范围；失败／取消不冒充完成。
-- [ ] 文档／基准变化使结果失效，阻止过期后台结果成为当前结果。
-- [ ] widgets 留在 UI 线程，测试取消／生命周期；用最简单的已验证后台方式，不设核心服务器。
-- [ ] 在 Windows 验证键盘／焦点、中文、长描述、DPI，并查看目标尺寸截图。
+- [x] 实现导入／运行／进度／取消、汇总、状态／待核查筛选、仅异常和搜索。导入与核查在后台 QThread 运行；不确定进度与取消按钮已接线；汇总计数、六个筛选与搜索已实现。
+- [x] 列表／详情支持预期／实际、全部出现位置、删除线范围、相邻上下文。多证据选择器、预期/实际、匹配方式、审查原因与带范围高亮的前/当前/后块重建上下文均已就位。
+- [x] 持续显示 LIMITED，MISSING 文案限定范围；失败／取消不冒充完成。"检查范围受限"提示在筛选与详情导航后仍可见；MISSING 文案限定于已检查范围。
+- [x] 文档／基准变化使结果失效，阻止过期后台结果成为当前结果。操作代数 token 加文档 id 匹配门控 worker 完成；取消运行不显示最终计数。
+- [x] widgets 留在 UI 线程，测试取消／生命周期；用最简单的已验证后台方式，不设核心服务器。worker 仅发出信号；UI 在 UI 线程应用结果。
+- [ ] 在 Windows 验证键盘／焦点、中文、长描述、DPI，并查看目标尺寸截图。键盘导航与焦点已在 macOS 测试；Windows DPI/截图检查仍待执行。
 
 **验收：**已配置＋差异与冲突待核查可区分；总计为三个状态加待核查；描述差异单独计数；缺失不虚构证据。浏览器仅作布局参考。
 
@@ -220,8 +246,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 同日经用户授权执行：在 macOS 开发机上"真实输入→真实块→可见来源"端到端成立。任务 1
 的 S6（确定性规则与规模验证）已于 2026-09-19 执行并记录证据：Task 3 所需的确定性
 规则已确立，无需发明产品策略。任务 3（确定性核查）已于 2026-09-20 经用户授权执行：
-生产匹配引擎精确实现经 S6 验证的契约，245 项测试通过，含真实摄取组合测试。建议的
-下个工作包为任务 4（Qt 审查工作区），等待明确执行授权。任务 1 剩余实验（S3、持久化
+生产匹配引擎精确实现经 S6 验证的契约，245 项测试通过，含真实摄取组合测试。任务 4
+（Qt 审查工作区）已于 2026-09-21 经用户授权以 13 个可审查子任务执行：完整审查
+工作区（后台导入/核查、取消、过期结果抑制、汇总计数、排序、筛选、搜索、结果
+详情、多证据、源上下文、LIMITED 提示、键盘导航）已实现，317 项测试通过且本地
+全部质量门禁为绿。建议的下个工作包为任务 5（基准管理与持久化），等待明确执行
+授权。任务 1 剩余实验（S3、持久化
 验证）仍待执行，需各自的授权及 Windows／样本访问。不重新开放技术栈，不自动开始下一个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境

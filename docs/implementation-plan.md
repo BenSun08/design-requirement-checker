@@ -64,6 +64,39 @@ search rather than in a batch ahead of the matching work; cross-item ambiguity
 and requirement-span association still run after all of a block's candidates
 are collected. No matching policy changed. 246 tests pass.
 
+**2026-09-21 execution record:** Task 4 (Qt review workspace) executed as 13
+reviewable subtasks on branch `task4-qt-review-workspace`. The MainWindow now
+owns an explicit `UiState` lifecycle (EMPTY / IMPORTING / READY / VERIFYING /
+COMPLETED / CANCELLED / FAILED) that drives action enablement, plus a monotonic
+operation-generation token that invalidates stale worker outcomes. DOCX import
+and `verify_document` run off the UI thread through small QObject workers on
+dedicated QThreads; cancellation uses the existing application callback. The
+workspace shell is a QSplitter (result list + detail) under a title/toolbar,
+summary+search strip and persistent status/footer. Completed runs display
+summary counts (total = configured + missing + struck_out + unresolved;
+DIFFERENT is orthogonal) and priority ordering
+(UNRESOLVED → MISSING → STRUCK_OUT → CONFIGURED+DIFFERENT → remaining
+CONFIGURED). Filters (全部/已配置/未配置/已划除/待人工核查/仅异常) and search
+(code/name/category/expected/description) operate on the cached result set
+without recomputing verification. The detail pane renders status, comparison
+state, expected/actual, match method, review reasons (with UNRESOLVED reason
+tokens mapped to Chinese in the UI only), per-status presentation (MISSING
+shows a scope-limited message with no fabricated evidence; STRUCK_OUT shows
+strike styling plus textual state; NOT_COMPARED shows the human-readable
+reason), a multi-evidence selector, and reconstructed prev/current/next block
+source context with requirement-span highlighting. LIMITED coverage shows a
+persistent "检查范围受限" notice that survives filtering and detail navigation.
+Keyboard navigation (Up/Down/Enter, Ctrl+F) is supported. matching.py and
+domain.py remain Qt-free; CheckItems are injected via the constructor
+(`Sequence[CheckItem]`, default empty → 尚未加载检查项, Run disabled). No
+persistence, checklist editor, Task 5, HTTP/sidecar, or generic task framework
+was introduced. 317 tests pass (96 in test_ui.py); ruff check, ruff format
+--check, mypy (strict), pip check and git diff --check all pass locally. A
+single full-pytest run intermittently segfaulted during teardown of windows
+that had started a background thread; the `_closing` guard plus
+`processEvents()` drain in `_stop_worker` made it non-reproducible in repeated
+runs but it remains a watch item for CI.
+
 [简体中文版](../docs-zh/implementation-plan.md)
 
 **Status:** updated after owner confirmation; planning artifact, not authorization to execute.
@@ -171,12 +204,12 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Files:** ui/main_window.py, application.py; tests/test_ui.py and tests/test_application.py.
 
-- [ ] Build import/run/progress/cancel, totals, status/unresolved filters, exception shortcut and search.
-- [ ] Implement list/detail selection with expected/actual comparison, every evidence occurrence, strike spans and nearby source context.
-- [ ] Show LIMITED coverage persistently; MISSING text must refer to checked scope. Failed/cancelled runs cannot masquerade as completed results.
-- [ ] Invalidate results on document/baseline changes and prevent obsolete background results from becoming current.
-- [ ] Keep widgets on the UI thread and test cancellation/lifecycle behavior. Use the simplest validated background approach without a core server.
-- [ ] Verify keyboard navigation/focus, Chinese input, long descriptions and DPI on Windows; inspect screenshots at target desktop sizes.
+- [x] Build import/run/progress/cancel, totals, status/unresolved filters, exception shortcut and search. Import and verification run on background QThreads; indeterminate progress and Cancel button are wired; summary counts, six filters and search are implemented.
+- [x] Implement list/detail selection with expected/actual comparison, every evidence occurrence, strike spans and nearby source context. Multi-evidence selector, expected/actual, match method, review reasons and reconstructed prev/current/next block context with span highlighting are present.
+- [x] Show LIMITED coverage persistently; MISSING text must refer to checked scope. "检查范围受限" notice survives filter and detail navigation; MISSING wording is scoped to the checked range.
+- [x] Invalidate results on document/baseline changes and prevent obsolete background results from becoming current. Operation-generation token plus document-id match gates worker completion; cancelled runs show no final counts.
+- [x] Keep widgets on the UI thread and test cancellation/lifecycle behavior. Workers emit only signals; UI applies results on the UI thread.
+- [ ] Verify keyboard navigation/focus, Chinese input, long descriptions and DPI on Windows; inspect screenshots at target desktop sizes. Keyboard navigation and focus tested on macOS; Windows DPI/screenshot inspection remains pending.
 
 **Acceptance:** configured + different versus unresolved conflicts are distinguishable; total = configured + missing + struck-out + unresolved; comparison differences are an independent count. Missing has no invented evidence. Use the browser as layout reference only.
 
@@ -228,7 +261,17 @@ A slice is complete only when its acceptance evidence exists, failures and scope
 
 ## Next authorized decision
 
-This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. S6 of Task 1 (deterministic rules and scale validation) was executed 2026-09-19 with recorded evidence: the deterministic rules Task 3 needs are established without inventing product policy. Task 3 (deterministic verification) was executed 2026-09-20 under owner authorization: the production matching engine implements exactly the validated S6 contract, with 245 passing tests including a real-ingestion composition test. The next proposed work package is Task 4 (Qt review workspace), pending explicit execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
+This update closes technology selection and records product policies. S1/S2 of Task 1 were executed with recorded evidence (2026-09-18, macOS; see [technical-spikes.md](technical-spikes.md)), and Task 2 (first DOCX vertical slice) was executed the same day under owner authorization: real input → real blocks → visible source works end-to-end on the macOS development machine. S6 of Task 1 (deterministic rules and scale validation) was executed 2026-09-19 with recorded evidence: the deterministic rules Task 3 needs are established without inventing product policy. Task 3 (deterministic verification) was executed 2026-09-20 under owner
+authorization: the production matching engine implements exactly the validated
+S6 contract, with 245 passing tests including a real-ingestion composition
+test. Task 4 (Qt review workspace) was executed 2026-09-21 under owner
+authorization as 13 reviewable subtasks: the full review workspace
+(background import/verification, cancellation, stale-outcome suppression,
+summary counts, ordering, filters, search, result detail, multi-evidence,
+source context, LIMITED notice, keyboard navigation) is implemented with 317
+passing tests and all local quality gates green. The next proposed work
+package is Task 5 (baseline management and persistence), pending explicit
+execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 

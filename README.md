@@ -5,8 +5,11 @@ implemented as a validated vertical slice: import a real `.docx`, view its
 blocks with effective-strike formatting and honest coverage warnings. The DOCX
 access strategy is backed by executed S1/S2 spike evidence. Deterministic
 verification (Task 3) is implemented as a pure matching engine on the
-validated S6 rule contract; the Qt review workspace, persistence and Windows
-distribution remain pending.
+validated S6 rule contract. The Qt review workspace (Task 4) is implemented:
+background import/verification, cancellation, stale-outcome suppression,
+summary counts, ordering, filters, search, result detail, multi-evidence
+navigation, source context, LIMITED coverage notice and keyboard navigation.
+Persistence (Task 5) and Windows distribution remain pending.
 
 ## Development platforms
 
@@ -79,11 +82,18 @@ Open the repository in VS Code or Cursor, select the interpreter from the local
 `.vscode/launch.json` starts the `design_requirement_checker` module and contains
 no developer-specific or operating-system-specific interpreter path.
 
-The window contains a title, an import action and a document view. Import a
-`.docx` to see its filename, fingerprint, coverage warnings and text blocks
-with strike formatting; parsing happens outside the widgets. Check and
-checklist-management actions remain disabled. It generates no results and
-stores no baseline. `prototype/` remains a separate historical mock.
+The window provides a title bar with 导入 DOCX / 开始核查 / 取消核查 /
+检查项管理 (management stays disabled until Task 5), a summary and search
+strip, a QSplitter with the result list and detail pane, and a persistent
+status/footer. Import and verification run off the UI thread with
+indeterminate progress. Completed runs show summary counts and priority
+ordering; filters (全部/已配置/未配置/已划除/待人工核查/仅异常) and search
+(code/name/category/expected/description) operate on cached results. The
+detail pane shows status, comparison state, expected/actual, match method,
+reasons, all evidence occurrences and reconstructed source context.
+CheckItems are injected at construction; with none loaded the window shows
+"尚未加载检查项" and Run stays disabled. It stores no baseline. `prototype/`
+remains a separate historical mock.
 
 ## Source layout
 
@@ -103,8 +113,13 @@ stores no baseline. `prototype/` remains a separate historical mock.
   (`import_document` → Document or explicit ImportFailure) and verification
   coordination (`verify_document` → VerificationOutcome with an explicit
   completed/cancelled lifecycle).
-- `src/design_requirement_checker/ui/main_window.py`: minimal Qt document view;
-  calls the application use case only.
+- `src/design_requirement_checker/ui/main_window.py`: Qt review workspace
+  (title/toolbar, summary+search strip, QSplitter result list/detail, status);
+  owns the UiState lifecycle and operation-generation stale-outcome token;
+  delegates import/verification to background workers.
+- `src/design_requirement_checker/ui/workers.py`: small QObject workers
+  (ImportWorker, VerificationWorker) that run application use cases off the
+  UI thread and emit results via signals.
 - `baseline_store.py` inside the package: documented responsibility boundary
   only; no business APIs yet.
 - `tests/test_domain.py`, `tests/test_docx_adapter.py`, `tests/test_application.py`,
@@ -197,6 +212,10 @@ categories, preview whitespace — see the technical-spike evidence). The S6
 spike validated the deterministic rules, and the Task 3 slice implements the
 production matching engine on exactly that contract (deterministic detection,
 evidence, classification and comparison, with cancellation and a
-completed/cancelled run lifecycle). Storage, background execution, the Qt
-review workspace and real Windows no-admin/offline deployment evidence are
-still pending. See the implementation plan for subsequent slices.
+completed/cancelled run lifecycle). The Task 4 slice implements the Qt review
+workspace (background import/verification, cancellation, stale-outcome
+suppression, summary counts, ordering, filters, search, result detail,
+multi-evidence, source context, LIMITED notice and keyboard navigation), all
+on the UI thread with workers off-thread, matching.py and domain.py remaining
+Qt-free. Persistence (Task 5) and real Windows no-admin/offline deployment
+evidence are still pending. See the implementation plan for subsequent slices.
