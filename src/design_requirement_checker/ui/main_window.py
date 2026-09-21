@@ -85,6 +85,18 @@ _REASON_LABELS: dict[str, str] = {
     "ambiguous-function-identity": "功能身份歧义",
 }
 
+# UI-only mapping for comparison_reason tokens. Domain tokens are left
+# unchanged; this only affects what the reviewer reads.
+_COMPARISON_REASON_LABELS: dict[str, str] = {
+    "expected-description-empty": "未设置期望描述",
+    "nothing-to-compare": "没有可比较的实际需求",
+    "evidence-struck": "匹配证据已被划除",
+    "result-unresolved": "核查结果存在不确定项",
+    "requirement-span-association-uncertain": "无法可靠确定需求描述范围",
+    "no-associated-requirement-content": "未找到与检测短语关联的需求内容",
+    "mixed-comparison-occurrences": "多处证据的描述比较结果不一致",
+}
+
 
 @dataclass(frozen=True)
 class ResultSummary:
@@ -555,7 +567,10 @@ class MainWindow(QMainWindow):
         if selected is not None:
             parts.append(f"<p>位置：{html.escape(format_location(selected.location))}</p>")
         if result.comparison_reason:
-            parts.append(f"<p>比较原因：{html.escape(result.comparison_reason)}</p>")
+            reason_text = _COMPARISON_REASON_LABELS.get(
+                result.comparison_reason, result.comparison_reason
+            )
+            parts.append(f"<p>比较原因：{html.escape(reason_text)}</p>")
         if result.review_reasons:
             reasons = "".join(
                 f"<li>{html.escape(_REASON_LABELS.get(r, r))}</li>" for r in result.review_reasons

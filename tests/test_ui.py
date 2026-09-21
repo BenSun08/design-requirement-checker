@@ -1027,6 +1027,32 @@ class TestResultDetail:
         assert "未比较描述" in window._detail_view.toPlainText()
         window.close()
 
+    def test_comparison_reason_tokens_are_localized(self, qapp) -> None:
+        tokens = {
+            "expected-description-empty": "未设置期望描述",
+            "nothing-to-compare": "没有可比较的实际需求",
+            "evidence-struck": "匹配证据已被划除",
+            "result-unresolved": "核查结果存在不确定项",
+            "requirement-span-association-uncertain": "无法可靠确定需求描述范围",
+            "no-associated-requirement-content": "未找到与检测短语关联的需求内容",
+            "mixed-comparison-occurrences": "多处证据的描述比较结果不一致",
+        }
+        window = MainWindow(check_items=(_item(),))
+        for token, label in tokens.items():
+            result = _result_with_evidence(
+                "r",
+                status=CheckStatus.CONFIGURED,
+                comparison_state=ComparisonState.DIFFERENT,
+                evidence=(_evidence(),),
+                comparison_reason=token,
+            )
+            window._show_detail(result)
+            text = window._detail_view.toPlainText()
+            assert label in text
+            # Raw stable token must not leak into the UI text.
+            assert token not in text
+        window.close()
+
     def test_expected_and_actual_text_shown(self, qapp) -> None:
         item = CheckItem(
             item_id="a",
