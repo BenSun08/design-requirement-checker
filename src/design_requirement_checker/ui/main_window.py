@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, Qt, QThread, QTimer, QUrl
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -358,21 +358,6 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         event.accept()
-
-    def _stop_worker(self) -> None:
-        """Legacy single-shot shutdown; kept only for any direct calls.
-
-        Prefer closeEvent's deferred-close path for normal termination — it
-        never blocks the UI thread indefinitely and guarantees no running
-        thread outlives the window.
-        """
-        if self._cancel_event is not None:
-            self._cancel_event.set()
-        for thread in list(self._active_threads):
-            thread.quit()
-        self._thread = None
-        self._worker = None
-        QCoreApplication.processEvents()
 
     # --- public lifecycle API ----------------------------------------------
 
