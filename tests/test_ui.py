@@ -872,6 +872,24 @@ class TestFiltersAndSearch:
         assert window._result_list.count() == 4
         window.close()
 
+    def test_result_rows_expose_status_and_difference(self, qapp) -> None:
+        window = _window_with_results(qapp, self._results())
+        texts = [window._result_list.item(i).text() for i in range(window._result_list.count())]
+        # Each row contains code, name, and a readable status.
+        joined = " | ".join(texts)
+        assert "CFG" in joined and "已配置" in joined
+        assert "MISS" in joined and "未配置" in joined
+        assert "STRUCK" in joined and "已划除" in joined
+        assert "UNRES" in joined and "待人工核查" in joined
+        # The DIFFERENT result appends the difference hint.
+        diff_row = next(t for t in texts if "CFG-DIFF" in t)
+        assert "已配置" in diff_row
+        assert "描述有差异" in diff_row
+        # A non-different configured row must NOT carry the difference hint.
+        same_row = next(t for t in texts if t.startswith("CFG") and "DIFF" not in t)
+        assert "描述有差异" not in same_row
+        window.close()
+
     def test_summary_stays_stable_while_filtering(self, qapp) -> None:
         window = _window_with_results(qapp, self._results())
         before = window._summary_label.text()

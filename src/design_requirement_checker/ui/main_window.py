@@ -429,7 +429,10 @@ class MainWindow(QMainWindow):
             return
         for result in visible:
             item = result.check_item
-            label = f"{item.code} · {item.name}"
+            parts = [item.code, item.name, self._status_text(result)]
+            if result.comparison_state is ComparisonState.DIFFERENT:
+                parts.append(_COMPARISON_LABELS[ComparisonState.DIFFERENT])
+            label = " · ".join(parts)
             list_item = QListWidgetItem(label)
             list_item.setData(Qt.ItemDataRole.UserRole, result)
             self._result_list.addItem(list_item)
