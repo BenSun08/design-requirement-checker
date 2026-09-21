@@ -464,8 +464,13 @@ class MainWindow(QMainWindow):
             f"<p>描述比较：{comparison_text}</p>",
             f"<p>期望描述：{html.escape(item.expected_description)}</p>",
         ]
+        if result.status is CheckStatus.MISSING:
+            parts.append("<p>在已检查范围内未找到匹配证据</p>")
         if actual_text:
-            parts.append(f"<p>实际需求：{html.escape(actual_text)}</p>")
+            if result.status is CheckStatus.STRUCK_OUT:
+                parts.append(f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>")
+            else:
+                parts.append(f"<p>实际需求：{html.escape(actual_text)}</p>")
         if match_method:
             parts.append(f"<p>匹配方式：{match_method}</p>")
         if result.comparison_reason:

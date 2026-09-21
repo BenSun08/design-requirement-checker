@@ -895,6 +895,50 @@ class TestResultDetail:
         window.close()
 
 
+class TestStatusSpecificPresentation:
+    def test_missing_shows_scoped_message_and_no_fake_actual(self, qapp) -> None:
+        result = _result("m", status=CheckStatus.MISSING)
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "在已检查范围内未找到匹配证据" in text
+        assert "实际需求" not in text
+        assert "匹配方式" not in text
+        window.close()
+
+    def test_struck_out_shows_textual_state_and_strike(self, qapp) -> None:
+        result = _result_with_evidence(
+            "s",
+            status=CheckStatus.STRUCK_OUT,
+            evidence=(_evidence(requirement_text="门控延时功能"),),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        html = window._detail_view.toHtml()
+        assert "已划除" in text
+        assert "门控延时功能" in text
+        assert "line-through" in html
+        window.close()
+
+    def test_not_compared_shows_reason_not_same_or_different(self, qapp) -> None:
+        result = _result_with_evidence(
+            "n",
+            status=CheckStatus.CONFIGURED,
+            comparison_state=ComparisonState.NOT_COMPARED,
+            evidence=(_evidence(),),
+            comparison_reason="no-parameter-overlap",
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "未比较描述" in text
+        assert "no-parameter-overlap" in text
+        assert "描述一致" not in text
+        assert "描述有差异" not in text
+        window.close()
+
+
 class TestPureFormatting:
     def test_body_location_is_one_based(self) -> None:
         location = DocumentLocation(
