@@ -50,7 +50,9 @@ from design_requirement_checker.domain import (
     ComparisonState,
     Coverage,
     Document,
+    DocumentBlock,
     DocumentLocation,
+    MatchEvidence,
     MatchType,
     Resolution,
     TextRun,
@@ -150,6 +152,41 @@ def _format_run_html(run: TextRun) -> str:
     if run.effective_strike is None:
         return f"〔{text}〕"
     return text
+
+
+def _format_block_with_highlight(
+    block: DocumentBlock, highlight_span: tuple[int, int] | None
+) -> str:
+    """Render a block with strike formatting and an optional highlighted span."""
+    chars: list[tuple[str, bool | None]] = []
+    for run in block.runs:
+        for ch in run.text:
+            chars.append((ch, run.effective_strike))
+    segments: list[tuple[str, bool | None, bool]] = []
+    cur_text = ""
+    cur_strike: bool | None = False
+    cur_hl = False
+    for i, (ch, strike) in enumerate(chars):
+        hl = bool(highlight_span and highlight_span[0] <= i < highlight_span[1])
+        if cur_text and (strike != cur_strike or hl != cur_hl):
+            segments.append((cur_text, cur_strike, cur_hl))
+            cur_text = ""
+        cur_text += ch
+        cur_strike = strike
+        cur_hl = hl
+    if cur_text:
+        segments.append((cur_text, cur_strike, cur_hl))
+    rendered = ""
+    for text, strike, hl in segments:
+        piece = html.escape(text)
+        if strike is True:
+            piece = f"<s>{piece}</s>"
+        elif strike is None:
+            piece = f"〔{piece}〕"
+        if hl:
+            piece = f"<mark>{piece}</mark>"
+        rendered += piece
+    return rendered or "（空段落）"
 
 
 def format_blocks_html(document: Document) -> str:
@@ -509,7 +546,42 @@ class MainWindow(QMainWindow):
             )
             parts.append(f"<p>证据：{links}</p>")
 
+        if selected is not None and result.status is not CheckStatus.MISSING:
+            parts.append(self._source_context_html(selected))
+
         self._detail_view.setHtml("".join(parts))
+
+    def _source_context_html(self, evidence: MatchEvidence) -> str:
+        """Rebuild prev/current/next block context from the current document."""
+        if self._document is None:
+            return ""
+        blocks = self._document.blocks
+        idx = next(
+            (i for i, b in enumerate(blocks) if b.block_id == evidence.block_id),
+            None,
+        )
+        if idx is None:
+            return ""
+        span = evidence.requirement_span
+        parts = ["<hr><p>源文本上下文（重建文本，非 Word 页面渲染）</p>"]
+        if idx > 0:
+            prev = blocks[idx - 1]
+            parts.append(f"<p><i>上一段：{html.escape(format_location(prev.location))}</i></p>")
+            parts.append(
+                f'<p style="white-space: pre-wrap">{_format_block_with_highlight(prev, None)}</p>'
+            )
+        current = blocks[idx]
+        parts.append(f"<p><b>当前：{html.escape(format_location(current.location))}</b></p>")
+        parts.append(
+            f'<p style="white-space: pre-wrap">{_format_block_with_highlight(current, span)}</p>'
+        )
+        if idx < len(blocks) - 1:
+            nxt = blocks[idx + 1]
+            parts.append(f"<p><i>下一段：{html.escape(format_location(nxt.location))}</i></p>")
+            parts.append(
+                f'<p style="white-space: pre-wrap">{_format_block_with_highlight(nxt, None)}</p>'
+            )
+        return "".join(parts)
 
     def _update_summary(self) -> None:
         if not self._results:

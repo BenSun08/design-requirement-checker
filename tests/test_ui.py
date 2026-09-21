@@ -1018,6 +1018,123 @@ class TestMultiEvidence:
         window.close()
 
 
+class TestSourceContext:
+    def _doc_with_three_blocks(self):
+        return Document(
+            document_id="doc-ui",
+            filename="ui.docx",
+            content_fingerprint="fp",
+            blocks=(
+                _block("body:p0", "前文段落"),
+                _block("body:p1", "门控延时功能已配置"),
+                _block("body:p2", "后文段落"),
+            ),
+            coverage=Coverage.COMPLETE,
+        )
+
+    def test_context_shows_prev_current_next_blocks(self, qapp) -> None:
+        document = self._doc_with_three_blocks()
+        ev = MatchEvidence(
+            evidence_id="e1",
+            document_id="doc-ui",
+            block_id="body:p1",
+            location=DocumentLocation(
+                document_id="doc-ui",
+                block_id="body:p1",
+                block_type=BlockType.PARAGRAPH,
+                part="body",
+                paragraph_index=1,
+            ),
+            raw_text="门控延时功能已配置",
+            matched_span=(0, 6),
+            requirement_span=(0, 6),
+            requirement_text="门控延时",
+            matched_term="门控延时",
+            match_type=MatchType.EXACT,
+            transformations=(),
+            strike_coverage=StrikeCoverage.NONE,
+        )
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev,))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "前文段落" in text
+        assert "门控延时功能已配置" in text
+        assert "后文段落" in text
+        window.close()
+
+    def test_current_block_location_is_one_based(self, qapp) -> None:
+        document = self._doc_with_three_blocks()
+        ev = MatchEvidence(
+            evidence_id="e1",
+            document_id="doc-ui",
+            block_id="body:p1",
+            location=DocumentLocation(
+                document_id="doc-ui",
+                block_id="body:p1",
+                block_type=BlockType.PARAGRAPH,
+                part="body",
+                paragraph_index=1,
+            ),
+            raw_text="门控延时功能已配置",
+            matched_span=(0, 6),
+            requirement_span=(0, 6),
+            requirement_text="门控延时",
+            matched_term="门控延时",
+            match_type=MatchType.EXACT,
+            transformations=(),
+            strike_coverage=StrikeCoverage.NONE,
+        )
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev,))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        assert "段2" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_requirement_span_highlighted(self, qapp) -> None:
+        document = self._doc_with_three_blocks()
+        ev = MatchEvidence(
+            evidence_id="e1",
+            document_id="doc-ui",
+            block_id="body:p1",
+            location=DocumentLocation(
+                document_id="doc-ui",
+                block_id="body:p1",
+                block_type=BlockType.PARAGRAPH,
+                part="body",
+                paragraph_index=1,
+            ),
+            raw_text="门控延时功能已配置",
+            matched_span=(0, 4),
+            requirement_span=(0, 4),
+            requirement_text="门控延时",
+            matched_term="门控延时",
+            match_type=MatchType.EXACT,
+            transformations=(),
+            strike_coverage=StrikeCoverage.NONE,
+        )
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev,))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        html = window._detail_view.toHtml()
+        assert "background" in html or "mark" in html
+        window.close()
+
+    def test_missing_has_no_source_context(self, qapp) -> None:
+        document = self._doc_with_three_blocks()
+        result = _result("m", status=CheckStatus.MISSING)
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "前文段落" not in text
+        assert "后文段落" not in text
+        window.close()
+
+
 class TestPureFormatting:
     def test_body_location_is_one_based(self) -> None:
         location = DocumentLocation(
