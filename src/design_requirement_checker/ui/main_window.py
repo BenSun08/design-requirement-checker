@@ -17,10 +17,11 @@ from __future__ import annotations
 import html
 import threading
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, QThread
+from PySide6.QtCore import QCoreApplication, Qt, QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -44,9 +46,12 @@ from design_requirement_checker.application import (
 from design_requirement_checker.domain import (
     CheckItem,
     CheckResult,
+    CheckStatus,
+    ComparisonState,
     Coverage,
     Document,
     DocumentLocation,
+    Resolution,
     TextRun,
 )
 from design_requirement_checker.ui.workers import ImportWorker, VerificationWorker
@@ -55,6 +60,38 @@ if TYPE_CHECKING:
     from design_requirement_checker.application import ImportFailure
 
 _LEGEND = "图例：<s>删除线</s>＝已划线文本；〔…〕＝删除线状态未知；其余为未划线原文。"
+
+
+@dataclass(frozen=True)
+class ResultSummary:
+    """Counts derived from domain states; 描述有差异 is orthogonal to total."""
+
+    total: int
+    configured: int
+    missing: int
+    struck_out: int
+    unresolved: int
+    different: int
+
+
+def _result_group(result: CheckResult) -> int:
+    """Stable sort key for result ordering (lower sorts first).
+
+    1. UNRESOLVED → 2. MISSING → 3. STRUCK_OUT → 4. CONFIGURED+DIFFERENT
+    → 5. remaining CONFIGURED.
+    """
+    if result.resolution is Resolution.UNRESOLVED:
+        return 0
+    if result.status is CheckStatus.MISSING:
+        return 1
+    if result.status is CheckStatus.STRUCK_OUT:
+        return 2
+    if (
+        result.status is CheckStatus.CONFIGURED
+        and result.comparison_state is ComparisonState.DIFFERENT
+    ):
+        return 3
+    return 4
 
 
 class UiState(Enum):
@@ -235,6 +272,7 @@ class MainWindow(QMainWindow):
         self._document = document
         self._results = ()
         self._state = UiState.READY
+        self._result_list.clear()
         self._show_document(document)
         self._update_actions()
 
@@ -252,8 +290,52 @@ class MainWindow(QMainWindow):
             return False
         self._results = tuple(results)
         self._state = UiState.COMPLETED
+        self._populate_results()
+        self._update_summary()
         self._update_actions()
         return True
+
+    # --- result summary & ordering -----------------------------------------
+
+    @staticmethod
+    def _compute_summary(results: Sequence[CheckResult]) -> ResultSummary:
+        configured = sum(1 for r in results if r.status is CheckStatus.CONFIGURED)
+        missing = sum(1 for r in results if r.status is CheckStatus.MISSING)
+        struck_out = sum(1 for r in results if r.status is CheckStatus.STRUCK_OUT)
+        unresolved = sum(1 for r in results if r.resolution is Resolution.UNRESOLVED)
+        different = sum(1 for r in results if r.comparison_state is ComparisonState.DIFFERENT)
+        return ResultSummary(
+            total=configured + missing + struck_out + unresolved,
+            configured=configured,
+            missing=missing,
+            struck_out=struck_out,
+            unresolved=unresolved,
+            different=different,
+        )
+
+    @staticmethod
+    def _order_results(results: Sequence[CheckResult]) -> tuple[CheckResult, ...]:
+        """Order by review priority; original order is stable within a group."""
+        return tuple(sorted(results, key=_result_group))
+
+    def _populate_results(self) -> None:
+        self._result_list.clear()
+        for result in self._order_results(self._results):
+            item = result.check_item
+            label = f"{item.code} · {item.name}"
+            list_item = QListWidgetItem(label)
+            list_item.setData(Qt.ItemDataRole.UserRole, result)
+            self._result_list.addItem(list_item)
+
+    def _update_summary(self) -> None:
+        if not self._results:
+            return
+        s = self._compute_summary(self._results)
+        self._summary_label.setText(
+            f"全部 {s.total} · 已配置 {s.configured} · 未配置 {s.missing}"
+            f" · 已划除 {s.struck_out} · 待人工核查 {s.unresolved}"
+            f" · 描述有差异 {s.different}"
+        )
 
     def cancel_verification(self) -> None:
         """Mark the run cancelled; results stay empty, never completed."""

@@ -23,10 +23,14 @@ from design_requirement_checker.application import (
 from design_requirement_checker.domain import (
     BlockType,
     CheckItem,
+    CheckResult,
+    CheckStatus,
+    ComparisonState,
     Coverage,
     Document,
     DocumentBlock,
     DocumentLocation,
+    Resolution,
     TableCellCoordinates,
     TextRun,
 )
@@ -84,6 +88,26 @@ def _item(item_id: str = "a", phrase: str = "功能") -> CheckItem:
         name=f"name-{item_id}",
         detection_phrase=phrase,
         aliases=(),
+    )
+
+
+def _result(
+    item_id: str,
+    *,
+    status: CheckStatus | None,
+    resolution: Resolution = Resolution.RESOLVED,
+    comparison_state: ComparisonState = ComparisonState.NOT_COMPARED,
+) -> CheckResult:
+    return CheckResult(
+        check_item=_item(item_id, "x"),
+        document_id="doc-ui",
+        resolution=resolution,
+        status=status,
+        evidence=(),
+        comparison_state=comparison_state,
+        comparison_reason="",
+        review_reasons=(),
+        rule_revision="r1",
     )
 
 
@@ -482,6 +506,73 @@ class TestReviewWorkspaceShell:
         window = MainWindow()
         assert window.width() >= 1024
         assert window.height() >= 600
+        window.close()
+
+
+class TestSummaryAndOrdering:
+    def test_summary_counts_match_domain_states(self, qapp) -> None:
+        results = (
+            _result("c1", status=CheckStatus.CONFIGURED),
+            _result("m1", status=CheckStatus.MISSING),
+            _result("s1", status=CheckStatus.STRUCK_OUT),
+            _result("u1", status=None, resolution=Resolution.UNRESOLVED),
+            _result("c2", status=CheckStatus.CONFIGURED),
+        )
+        window = MainWindow(check_items=(_item(),))
+        summary = window._compute_summary(results)
+        assert summary.configured == 2
+        assert summary.missing == 1
+        assert summary.struck_out == 1
+        assert summary.unresolved == 1
+        assert summary.total == 5
+
+    def test_different_is_orthogonal_to_total(self, qapp) -> None:
+        results = (
+            _result(
+                "c1", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.DIFFERENT
+            ),
+            _result("c2", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME),
+        )
+        window = MainWindow(check_items=(_item(),))
+        summary = window._compute_summary(results)
+        assert summary.total == 2
+        assert summary.configured == 2
+        assert summary.different == 1
+
+    def test_ordering_priority(self, qapp) -> None:
+        configured_same = _result(
+            "cs", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME
+        )
+        configured_diff = _result(
+            "cd", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.DIFFERENT
+        )
+        missing = _result("m", status=CheckStatus.MISSING)
+        struck = _result("s", status=CheckStatus.STRUCK_OUT)
+        unresolved = _result("u", status=None, resolution=Resolution.UNRESOLVED)
+        results = (configured_same, configured_diff, missing, struck, unresolved)
+        window = MainWindow(check_items=(_item(),))
+        ordered = window._order_results(results)
+        codes = [r.check_item.code for r in ordered]
+        assert codes == ["U", "M", "S", "CD", "CS"]
+
+    def test_original_order_preserved_within_group(self, qapp) -> None:
+        a = _result("a", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME)
+        b = _result("b", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME)
+        c = _result("c", status=CheckStatus.CONFIGURED, comparison_state=ComparisonState.SAME)
+        window = MainWindow(check_items=(_item(),))
+        ordered = window._order_results((c, a, b))
+        codes = [r.check_item.code for r in ordered]
+        assert codes == ["C", "A", "B"]
+
+    def test_summary_displayed_after_completion(self, qapp) -> None:
+        from design_requirement_checker.matching import verify
+
+        document = _document(_block("body:p0", "功能"))
+        window = MainWindow(check_items=(_item("a", "功能"),))
+        window.set_document(document)
+        results = verify(document, (_item("a", "功能"),))
+        window.complete_verification(window._op_generation, results)
+        assert "全部" in window._summary_label.text()
         window.close()
 
 
