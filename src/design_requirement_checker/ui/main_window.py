@@ -19,12 +19,15 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QCoreApplication, QThread
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QTextBrowser,
     QVBoxLayout,
@@ -39,6 +42,7 @@ from design_requirement_checker.domain import (
     DocumentLocation,
     TextRun,
 )
+from design_requirement_checker.ui.workers import ImportWorker
 
 if TYPE_CHECKING:
     from design_requirement_checker.application import ImportFailure
@@ -145,6 +149,10 @@ class MainWindow(QMainWindow):
         self._manage_button = QPushButton("检查项管理")
         self._manage_button.setEnabled(False)
         actions.addWidget(self._manage_button)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)  # indeterminate
+        self._progress.setVisible(False)
+        actions.addWidget(self._progress)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -163,7 +171,25 @@ class MainWindow(QMainWindow):
         layout.addWidget(panel, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("尚未导入文档")
+        self._thread: QThread | None = None
+        self._worker: ImportWorker | None = None
+        self._active_threads: list[QThread] = []
         self._update_actions()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._stop_worker()
+        super().closeEvent(event)
+
+    def _stop_worker(self) -> None:
+        """Quit every running background thread; blocks briefly for clean exit."""
+        for thread in list(self._active_threads):
+            thread.quit()
+            thread.wait(2000)
+        self._active_threads.clear()
+        self._thread = None
+        self._worker = None
+        # Drain queued worker-finished signals so they don't fire after close.
+        QCoreApplication.processEvents()
 
     # --- public lifecycle API ----------------------------------------------
 
@@ -234,18 +260,53 @@ class MainWindow(QMainWindow):
         self._cancel_button.setEnabled(s in (UiState.IMPORTING, UiState.VERIFYING))
         self._manage_button.setEnabled(False)
 
-    # --- import (synchronous until Task 4.2 moves it off the UI thread) ----
+    # --- background import --------------------------------------------------
 
     def _on_import_clicked(self) -> None:
-        # Deferred import keeps startup composition free of document adapters.
-        from design_requirement_checker.application import import_document
-
         path, _selected_filter = QFileDialog.getOpenFileName(
             self, "选择 DOCX 文件", "", "Word 文档 (*.docx)"
         )
         if not path:
             return
-        self.show_import_outcome(import_document(path))
+        self._start_import(path)
+
+    def _start_import(self, path: str) -> None:
+        """Run import off the UI thread; stale completions are discarded."""
+        self._op_generation += 1
+        generation = self._op_generation
+        self._state = UiState.IMPORTING
+        self._results = ()
+        self._progress.setVisible(True)
+        self.statusBar().showMessage("正在读取文档…")
+        self._update_actions()
+
+        self._thread = QThread()
+        self._worker = ImportWorker(path, generation)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_import_finished)
+        self._worker.finished.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(
+            lambda: (
+                self._active_threads.remove(self._thread)
+                if self._thread in self._active_threads
+                else None
+            )
+        )
+        self._active_threads.append(self._thread)
+        self._thread.start()
+
+    def _on_import_finished(self, outcome: Document | ImportFailure, generation: int) -> bool:
+        """Apply the import outcome only if its generation is still current."""
+        if generation != self._op_generation:
+            return False
+        self._progress.setVisible(False)
+        self._thread = None
+        self._worker = None
+        self.show_import_outcome(outcome)
+        return True
 
     def show_import_outcome(self, outcome: Document | ImportFailure) -> None:
         """Display an import outcome; parsing happens outside this window."""

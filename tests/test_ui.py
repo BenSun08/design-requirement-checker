@@ -6,9 +6,12 @@ failure — with only implemented operations enabled.
 """
 
 import os
+import threading
+import time
 
 import fixture_factory as fixtures
 import pytest
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QApplication, QPushButton
 
@@ -191,6 +194,93 @@ class TestUiLifecycle:
         window.set_document(_document(_block("body:p0", "其他")))
         assert window.state is UiState.READY
         assert window.results == ()
+        window.close()
+
+
+def _process_until(qapp, predicate, timeout_ms: int = 2000) -> bool:
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+class TestBackgroundImport:
+    def test_start_import_sets_importing_state(self, qapp) -> None:
+        window = MainWindow()
+        window._start_import("/fake/path.docx")
+        assert window.state is UiState.IMPORTING
+        assert window._import_button.isEnabled() is False
+        assert window._run_button.isEnabled() is False
+        assert window._cancel_button.isEnabled() is True
+        window.close()
+
+    def test_matching_generation_applies_import_success(self, qapp) -> None:
+        window = MainWindow()
+        window._op_generation = 5
+        window._state = UiState.IMPORTING
+        document = _document(_block("body:p0", "内容"))
+        applied = window._on_import_finished(document, 5)
+        assert applied is True
+        assert window.state is UiState.READY
+        window.close()
+
+    def test_stale_import_finish_is_ignored(self, qapp) -> None:
+        window = MainWindow()
+        window._op_generation = 2  # current operation
+        document_a = _document(_block("body:p0", "A"))
+        applied = window._on_import_finished(document_a, 1)  # stale
+        assert applied is False
+        window.close()
+
+    def test_import_failure_sets_failed_state(self, qapp) -> None:
+        window = MainWindow()
+        window._op_generation = 1
+        window._state = UiState.IMPORTING
+        failure = ImportFailure("broken.docx", "invalid-or-unreadable-document", "boom")
+        applied = window._on_import_finished(failure, 1)
+        assert applied is True
+        assert window.state is UiState.FAILED
+        assert window.results == ()
+        window.close()
+
+    def test_import_runs_off_ui_thread(self, qapp, tmp_path) -> None:
+        path = fixtures.build_normal(tmp_path / "normal.docx")
+        window = MainWindow()
+        window._start_import(str(path))
+        assert window.state is UiState.IMPORTING
+        assert _process_until(qapp, lambda: window.state is UiState.READY)
+        assert "normal.docx" in window._summary_label.text()
+        window.close()
+
+    def test_late_stale_background_import_does_not_replace_current(
+        self, qapp, tmp_path, monkeypatch
+    ) -> None:
+        import design_requirement_checker.application as app_mod
+
+        path_a = str(tmp_path / "a.docx")
+        path_b = str(fixtures.build_normal(tmp_path / "b.docx"))
+        a_release = threading.Event()
+
+        def fake_import(path):
+            if path == path_a:
+                a_release.wait(timeout=5)
+                return ImportFailure("a.docx", "file-access-error", "stale")
+            return import_document(path)
+
+        monkeypatch.setattr(app_mod, "import_document", fake_import)
+
+        window = MainWindow()
+        window._start_import(path_a)  # A blocks
+        window._start_import(path_b)  # B completes fast
+        assert _process_until(qapp, lambda: window.state is UiState.READY)
+        assert "b.docx" in window._summary_label.text()
+        a_release.set()  # let the stale A finish
+        _process_until(qapp, lambda: True, timeout_ms=500)  # drain queued signals
+        # A must not replace B.
+        assert "b.docx" in window._summary_label.text()
         window.close()
 
 
