@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, Qt, QThread
+from PySide6.QtCore import QCoreApplication, Qt, QThread, QUrl
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -51,7 +51,6 @@ from design_requirement_checker.domain import (
     Coverage,
     Document,
     DocumentLocation,
-    MatchEvidence,
     MatchType,
     Resolution,
     TextRun,
@@ -262,6 +261,7 @@ class MainWindow(QMainWindow):
         self._result_list.setMinimumWidth(240)
         self._detail_view = QTextBrowser()
         self._detail_view.setOpenExternalLinks(False)
+        self._detail_view.anchorClicked.connect(self._on_evidence_anchor)
         self._splitter.addWidget(self._result_list)
         self._splitter.addWidget(self._detail_view)
         self._splitter.setStretchFactor(0, 1)
@@ -278,6 +278,8 @@ class MainWindow(QMainWindow):
         self._active_threads: list[QThread] = []
         self._cancel_event: threading.Event | None = None
         self._closing = False
+        self._detail_result: CheckResult | None = None
+        self._evidence_index: int = 0
         self._update_actions()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -443,18 +445,36 @@ class MainWindow(QMainWindow):
             return "已划除"
         return "未知"
 
-    @staticmethod
-    def _primary_evidence(result: CheckResult) -> MatchEvidence | None:
-        for evidence in result.evidence:
-            if evidence.evidence_id == result.primary_evidence_id:
-                return evidence
-        return result.evidence[0] if result.evidence else None
-
     def _show_detail(self, result: CheckResult) -> None:
+        self._detail_result = result
+        self._evidence_index = 0
+        self._render_detail()
+
+    def _select_evidence(self, index: int) -> None:
+        if self._detail_result is None:
+            return
+        if 0 <= index < len(self._detail_result.evidence):
+            self._evidence_index = index
+            self._render_detail()
+
+    def _on_evidence_anchor(self, url: QUrl) -> None:
+        scheme, _, value = url.toString().partition(":")
+        if scheme == "evidence" and value.isdigit():
+            self._select_evidence(int(value))
+
+    def _render_detail(self) -> None:
+        result = self._detail_result
+        if result is None:
+            return
         item = result.check_item
-        primary = self._primary_evidence(result)
-        actual_text = primary.requirement_text if primary is not None else ""
-        match_method = _MATCH_TYPE_LABELS.get(primary.match_type, "") if primary is not None else ""
+        evidence = result.evidence
+        selected = (
+            evidence[self._evidence_index] if 0 <= self._evidence_index < len(evidence) else None
+        )
+        actual_text = selected.requirement_text if selected is not None else ""
+        match_method = (
+            _MATCH_TYPE_LABELS.get(selected.match_type, "") if selected is not None else ""
+        )
         comparison_text = _COMPARISON_LABELS.get(result.comparison_state, "未比较描述")
 
         parts: list[str] = [
@@ -473,6 +493,8 @@ class MainWindow(QMainWindow):
                 parts.append(f"<p>实际需求：{html.escape(actual_text)}</p>")
         if match_method:
             parts.append(f"<p>匹配方式：{match_method}</p>")
+        if selected is not None:
+            parts.append(f"<p>位置：{html.escape(format_location(selected.location))}</p>")
         if result.comparison_reason:
             parts.append(f"<p>比较原因：{html.escape(result.comparison_reason)}</p>")
         if result.review_reasons:
@@ -480,6 +502,12 @@ class MainWindow(QMainWindow):
                 f"<li>{html.escape(_REASON_LABELS.get(r, r))}</li>" for r in result.review_reasons
             )
             parts.append(f"<p>核查原因：</p><ul>{reasons}</ul>")
+
+        if len(evidence) > 1:
+            links = " ".join(
+                f'<a href="evidence:{i}">证据 {i + 1}</a>' for i in range(len(evidence))
+            )
+            parts.append(f"<p>证据：{links}</p>")
 
         self._detail_view.setHtml("".join(parts))
 

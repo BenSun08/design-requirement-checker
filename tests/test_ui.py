@@ -121,6 +121,10 @@ def _evidence(
     match_type: MatchType = MatchType.EXACT,
     block_id: str = "body:p0",
 ) -> MatchEvidence:
+    # Derive zero-based paragraph index from "body:pN" ids for one-based display.
+    para_index = 0
+    if block_id.startswith("body:p") and block_id[6:].isdigit():
+        para_index = int(block_id[6:])
     return MatchEvidence(
         evidence_id=evidence_id,
         document_id="doc-ui",
@@ -130,7 +134,7 @@ def _evidence(
             block_id=block_id,
             block_type=BlockType.PARAGRAPH,
             part="body",
-            paragraph_index=0,
+            paragraph_index=para_index,
         ),
         raw_text=requirement_text,
         matched_span=(0, len(requirement_text)),
@@ -936,6 +940,81 @@ class TestStatusSpecificPresentation:
         assert "no-parameter-overlap" in text
         assert "描述一致" not in text
         assert "描述有差异" not in text
+        window.close()
+
+
+class TestMultiEvidence:
+    def test_evidence_selector_shows_all_occurrences(self, qapp) -> None:
+        ev1 = _evidence(evidence_id="e1", requirement_text="第一处需求")
+        ev2 = _evidence(evidence_id="e2", requirement_text="第二处需求")
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev1, ev2),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "证据 1" in text
+        assert "证据 2" in text
+        window.close()
+
+    def test_selecting_evidence_updates_actual_text(self, qapp) -> None:
+        ev1 = _evidence(evidence_id="e1", requirement_text="第一处需求")
+        ev2 = _evidence(evidence_id="e2", requirement_text="第二处需求")
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev1, ev2),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "第一处需求" in window._detail_view.toPlainText()
+        window._select_evidence(1)
+        text = window._detail_view.toPlainText()
+        assert "第二处需求" in text
+        assert "第一处需求" not in text
+        window.close()
+
+    def test_match_method_label_per_evidence(self, qapp) -> None:
+        ev1 = _evidence(evidence_id="e1", match_type=MatchType.EXACT)
+        ev2 = _evidence(evidence_id="e2", match_type=MatchType.ALIAS)
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev1, ev2),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "精确匹配" in window._detail_view.toPlainText()
+        window._select_evidence(1)
+        assert "别名匹配" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_evidence_location_shown(self, qapp) -> None:
+        ev = _evidence(evidence_id="e1", block_id="body:p3")
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev,),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        assert "段4" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_no_confidence_score_in_detail(self, qapp) -> None:
+        ev = _evidence()
+        result = _result_with_evidence(
+            "a",
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev,),
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText().lower()
+        assert "confidence" not in text
+        assert "%" not in window._detail_view.toPlainText()
         window.close()
 
 
