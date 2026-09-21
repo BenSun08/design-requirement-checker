@@ -72,9 +72,11 @@ matching.py 与 domain.py 保持无 Qt；CheckItems 通过构造函数注入
 （`Sequence[CheckItem]`，默认空 → 尚未加载检查项，运行禁用）。未引入持久化、
 清单编辑器、Task 5、HTTP/sidecar 或通用任务框架。317 项测试通过
 （test_ui.py 96 项）；ruff check、ruff format --check、mypy（严格）、
-pip check 与 git diff --check 本地全部通过。一次全量 pytest 在关闭已启动
-后台线程的窗口期间间歇段错误；`_closing` 守卫与 `_stop_worker` 中的
-`processEvents()` 排空使其在多次运行中不可复现，但仍为 CI 观察项。
+pip check 与 git diff --check 本地全部通过。此前关闭已启动后台线程的
+窗口期间出现的间歇段错误已解决：`_stop_worker` 现在保留所有尚未真正
+结束的 QThread 的所有权（绝不销毁仍在运行的线程），在退出前设置核查
+取消事件，且 `_finish_operation` 仅在当前线程/工人引用仍指向本次完成
+的操作时才清除它们。
 
 [English source](../docs/implementation-plan.md)
 

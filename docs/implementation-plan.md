@@ -91,11 +91,12 @@ domain.py remain Qt-free; CheckItems are injected via the constructor
 (`Sequence[CheckItem]`, default empty → 尚未加载检查项, Run disabled). No
 persistence, checklist editor, Task 5, HTTP/sidecar, or generic task framework
 was introduced. 317 tests pass (96 in test_ui.py); ruff check, ruff format
---check, mypy (strict), pip check and git diff --check all pass locally. A
-single full-pytest run intermittently segfaulted during teardown of windows
-that had started a background thread; the `_closing` guard plus
-`processEvents()` drain in `_stop_worker` made it non-reproducible in repeated
-runs but it remains a watch item for CI.
+--check, mypy (strict), pip check and git diff --check all pass locally. The
+prior intermittent teardown segfault for windows that started a background
+thread is resolved: `_stop_worker` now retains ownership of any QThread that
+has not actually finished (never destroying a running thread), sets the
+verification cancel event before quitting, and `_finish_operation` only clears
+current thread/worker refs when they still refer to the completing operation.
 
 [简体中文版](../docs-zh/implementation-plan.md)
 
