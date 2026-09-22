@@ -35,9 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     # --- Recovery / failure UX ---
     if load_result.ok and load_result.source == "backup":
         # Recovered from backup — show persistent in-window warning.
-        window.set_baseline_recovered(
-            "已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限"
-        )
+        window.set_baseline_recovered("已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限")
     elif not load_result.ok:
         # Neither primary nor backup usable — explicit failure.
         window.set_baseline_failure(load_result.error or "未知错误")

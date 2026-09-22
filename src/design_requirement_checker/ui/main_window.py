@@ -251,8 +251,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         notice = QLabel(
-            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。"
-            "点击 “检查项管理” 可编辑基准内容。"
+            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。点击 “检查项管理” 可编辑基准内容。"
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -333,13 +332,9 @@ class MainWindow(QMainWindow):
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._search_input.setFocus)
         if self._check_items:
-            self.statusBar().showMessage(
-                f"已加载 {len(self._check_items)} 项检查基准"
-            )
+            self.statusBar().showMessage(f"已加载 {len(self._check_items)} 项检查基准")
         else:
-            self.statusBar().showMessage(
-                "尚未加载检查基准 — 点击检查项管理以配置"
-            )
+            self.statusBar().showMessage("尚未加载检查基准 — 点击检查项管理以配置")
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
@@ -436,8 +431,7 @@ class MainWindow(QMainWindow):
             "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
         )
         self._baseline_banner.setText(
-            f"检查基准加载失败：{message}\n"
-            f"请检查 AppData 目录权限或重新配置基准。"
+            f"检查基准加载失败：{message}\n请检查 AppData 目录权限或重新配置基准。"
         )
         self._baseline_banner.setVisible(True)
         self.statusBar().showMessage("检查基准加载失败")
@@ -892,9 +886,7 @@ class MainWindow(QMainWindow):
 
         # --- Publish: mutate snapshot + invalidate stale results ---
         self.set_check_items(new_items, self._baseline_id)
-        self.statusBar().showMessage(
-            "检查基准已变更 — 请重新核查以生成新结果"
-        )
+        self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
 
     def set_check_items(
         self,

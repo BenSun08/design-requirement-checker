@@ -130,9 +130,7 @@ class ItemEditorDialog(QDialog):
 
         # --- Build candidate aliases ---
         raw_aliases = [
-            line.strip()
-            for line in self._aliases_edit.toPlainText().splitlines()
-            if line.strip()
+            line.strip() for line in self._aliases_edit.toPlainText().splitlines() if line.strip()
         ]
         aliases = self._build_aliases(raw_aliases)
 
@@ -154,8 +152,7 @@ class ItemEditorDialog(QDialog):
         """Preserve alias_ids whose text content is unchanged."""
         if self._existing is None:
             return tuple(
-                CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes="")
-                for t in new_texts
+                CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes="") for t in new_texts
             )
 
         # Map existing alias text → alias_id

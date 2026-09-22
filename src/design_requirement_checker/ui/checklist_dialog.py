@@ -60,9 +60,7 @@ class ChecklistDialog(QDialog):
         outer.setContentsMargins(16, 14, 16, 14)
         outer.setSpacing(12)
 
-        header = QLabel(
-            "编辑检查基准：新增、修改或调整每项的启用状态后点击“保存基准”以持久化。"
-        )
+        header = QLabel("编辑检查基准：新增、修改或调整每项的启用状态后点击“保存基准”以持久化。")
         header.setWordWrap(True)
         outer.addWidget(header)
 
@@ -201,8 +199,7 @@ class ChecklistDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "确认删除",
-            f"确定删除检查项 “{existing.code} · {existing.name}” 吗？\n"
-            f"此操作不可撤销。",
+            f"确定删除检查项 “{existing.code} · {existing.name}” 吗？\n此操作不可撤销。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
