@@ -285,3 +285,150 @@ class TestVerifyDocument:
                 state=VerificationState.CANCELLED,
                 results=completed.results,
             )
+
+
+# ---------------------------------------------------------------------------
+# Task 5, T5.2 — Baseline cross-item validation
+# ---------------------------------------------------------------------------
+
+
+def _vitem(
+    item_id: str,
+    code: str,
+    name: str,
+    phrase: str,
+    *,
+    aliases: tuple = (),
+    enabled: bool = True,
+) -> CheckItem:
+    from design_requirement_checker.domain import CheckItemAlias
+
+    return CheckItem(
+        item_id=item_id,
+        code=code,
+        name=name,
+        detection_phrase=phrase,
+        aliases=tuple(
+            CheckItemAlias(alias_id=f"{item_id}-a{i}", text=t, notes="")
+            for i, t in enumerate(aliases)
+        ),
+        enabled=enabled,
+    )
+
+
+class TestBaselineValidation:
+    def test_unique_baseline_no_issues(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "检测A"),
+            _vitem("b", "B", "功能B", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert result.is_valid
+        assert result.errors == ()
+        assert result.warnings == ()
+
+    def test_duplicate_code_error(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "DUP", "功能A", "检测A"),
+            _vitem("b", "DUP", "功能B", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert not result.is_valid
+        assert len(result.errors) == 1
+        assert result.errors[0].kind == "duplicate-code"
+        assert set(result.errors[0].item_ids) == {"a", "b"}
+
+    def test_duplicate_name_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "同名", "检测A"),
+            _vitem("b", "B", "同名", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert result.is_valid  # warnings don't block
+        names = [w.kind for w in result.warnings]
+        assert "duplicate-name" in names
+
+    def test_same_phrase_across_items_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "相同检测短语"),
+            _vitem("b", "B", "功能B", "相同检测短语"),
+        )
+        result = validate_baseline(items)
+        collision_kinds = [w.kind for w in result.warnings]
+        assert "phrase-collision" in collision_kinds
+
+    def test_alias_collides_with_other_detection_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "检测短语X"),
+            _vitem("b", "B", "功能B", "检测短语B", aliases=("检测短语X",)),
+        )
+        result = validate_baseline(items)
+        collision_kinds = [w.kind for w in result.warnings]
+        assert "phrase-collision" in collision_kinds
+
+    def test_substring_overlap_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "门控制延时"),
+            _vitem("b", "B", "功能B", "2门控制增加门控制延时功能"),
+        )
+        result = validate_baseline(items)
+        overlap_kinds = [w.kind for w in result.warnings]
+        # Either phrase-collision (after normalize they overlap) or phrase-overlap.
+        assert "phrase-overlap" in overlap_kinds or "phrase-collision" in overlap_kinds
+
+    def test_normal_non_overlapping_phrases_no_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "2门控制延时"),
+            _vitem("b", "B", "功能B", "门锁状态反馈"),
+        )
+        result = validate_baseline(items)
+        phrase_warnings = [
+            w for w in result.warnings if w.kind in ("phrase-collision", "phrase-overlap")
+        ]
+        assert phrase_warnings == []
+
+    def test_disabled_item_still_validated(self) -> None:
+        """Disabled items are still part of the persisted baseline and must
+        be validated for duplicate code / names / phrases."""
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "DUP", "功能A", "检测A", enabled=False),
+            _vitem("b", "DUP", "功能B", "检测B", enabled=True),
+        )
+        result = validate_baseline(items)
+        assert not result.is_valid
+        assert len(result.errors) == 1
+        assert result.errors[0].kind == "duplicate-code"
+
+    def test_deterministic_stable_ordering(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items_a = (
+            _vitem("x", "SAME", "Z", "Z"),
+            _vitem("y", "SAME", "Y", "Y"),
+        )
+        items_b = tuple(reversed(items_a))
+        r1 = validate_baseline(items_a)
+        r2 = validate_baseline(items_b)
+        # Same errors/warnings regardless of input order.
+        assert [(e.kind, e.item_ids) for e in r1.errors] == [
+            (e.kind, e.item_ids) for e in r2.errors
+        ]
+        assert [(w.kind, w.item_ids) for w in r1.warnings] == [
+            (w.kind, w.item_ids) for w in r2.warnings
+        ]
