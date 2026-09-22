@@ -216,14 +216,15 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 ## Task 5 — Baseline management and persistence
 
+**Prerequisite evidence:** Persistence validation spike EXECUTED (initial 2026-09-20, corrected atomic-save contract 2026-09-22) — see `docs/technical-spikes.md`. **Selected format: JSON file** (UTF-8, two-temp-file atomic save: temp-new+fsync → copy primary→temp-backup+fsync → os.replace(temp-backup→.bak) → os.replace(temp-new→primary) — primary is never moved away before new primary is installed; `.bak` lives alongside primary, `QStandardPaths.AppDataLocation/baseline.json`, strict schema validation, `schemaVersion = 1`, stable `item_id`/`alias_id`, explicit `(data, source)` return tuple on load). 56 spike tests pass on macOS; same tests gate on Windows CI.
+
 **Files:** baseline_store.py, ui/checklist_dialog.py, application.py; tests/test_baseline_store.py and tests/test_ui.py.
 
-- [ ] Test load/save/restart, invalid schema/data, interrupted save/recovery, write denial and preserving the prior baseline on failure.
-- [ ] Implement the selected data format in the validated user-writable location, separate from the program directory.
+- [ ] Implement JSON load/save/restart in `src/baseline_store.py` following the validated contract in `docs/technical-spikes.md` (save algorithm, recovery policy, strict validation, failure semantics).
 - [ ] Add/edit code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled; reject duplicate codes, flag duplicate names/overlapping phrases.
 - [ ] Provide disable and confirmed delete; preserve stable IDs. Empty expectedDescription remains permitted.
 - [ ] Save one baseline; invalidate results; reload after restart. No customer/order template selector or synchronization.
-- [ ] Check backup/replacement behavior with the distribution format and no elevation.
+- [ ] Verify backup/replacement behavior with the distribution format and no elevation.
 
 **Acceptance:** engineers can maintain the baseline without editing source; current-order enabled items determine the run; failures never silently discard edits or corrupt the saved baseline.
 

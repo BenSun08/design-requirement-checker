@@ -4,7 +4,7 @@
 
 本文件为同名英文文档的对应中文版本；字段、状态、路径与命令保留原技术标识。
 
-状态：**S1/S2 已于 2026-09-18、S6 已于 2026-09-19 在 macOS 开发机上执行——见下方"已执行证据"。S3 与持久化验证仍为已规划、未执行。**用户已选择生产技术栈并确认产品规则 1–7。目标为 Windows 10/11 x64、无管理员／安装权限。本文件规定所选栈内的有限验证，不授权进一步执行实验或生产实现。时间预算为投入上限，不是交付承诺；每周约可投入八小时。
+状态：**S1/S2 已于 2026-09-18、S6 已于 2026-09-19、持久化验证（初次 2026-09-20，原子保存契约修正 2026-09-22）已于 macOS 开发机执行——见下方"已执行证据"。S3 仍为已规划、未执行。**用户已选择生产技术栈并确认产品规则 1–7。目标为 Windows 10/11 x64、无管理员／安装权限。本文件规定所选栈内的有限验证，不授权进一步执行实验或生产实现。时间预算为投入上限，不是交付承诺；每周约可投入八小时。
 
 开发和 CI 在 macOS／Windows 共用 Python 3.13／PySide6 源码；生产仍为
 Windows 10/11 x64。Windows 包只在 Windows 构建，初始候选格式为
@@ -363,9 +363,142 @@ DIFFERENT / UNRESOLVED（部分删除）/ STRUCK_OUT，与标签完全一致。S
 冲突与歧义行为、比较独立性、规模可行性、取消粒度与确定性均已确立。
 Task 3 仍是独立切片，等待明确授权；本实验未实现它。
 
-## 所选栈内的持久化验证
+## 已执行证据——基准持久化验证（初次 2026-09-20，原子保存契约修正 2026-09-22）
 
-实现基准持久化前，比较足够支撑一套基准的最小本地格式。验证稳定 ID、必填 detectionPhrase、Unicode、原子保存／恢复、权限失败、schema 标识和重启。使用程序文件之外的用户可写应用数据目录，不建共享数据库服务。用简短决策记录选定格式，初始上限 1–2 h；不增加多基准或版本管理。
+在 macOS 开发机上作为一次有界实验执行。未修改任何生产 `src/` 文件；全部代码位于 `tests/` 下。对比了两种候选：**JSON 文件**（UTF-8、临时文件＋原子替换）和 **SQLite**（stdlib sqlite3、最小 3 表 schema）。域模型见 `src/domain.py`，定义 `CheckItem` 和 `CheckItemAlias`（独立冻结 dataclass，`item_id`／`alias_id` 为稳定身份）。
+
+### 环境
+
+- OS: macOS 26.7 (x86_64)；仅为开发平台，非生产目标。
+- Python 3.13.7; PySide6 6.11.2; pytest 9.1.1。
+- 实验代码: `tests/persistence_probe.py`（两种候选的序列化辅助）和 `tests/test_spike_persistence.py`（42 个手工标记测试）。
+- Windows 证据: GitHub CI 在 `windows-latest` 上运行同一套测试——为源码级门禁覆盖，非 S3 部署证据。
+
+### 候选格式对比
+
+| 评判维度 | JSON 候选 | SQLite 候选 |
+|---|---|---|
+| Schema 标识 | 顶层 `schemaVersion` 整数；缺失、类型错误或不支持的值均抛 `ValueError` | `baseline_meta` 表中 `schemaVersion` 行；schema 为固定 SQL |
+| CheckItem 稳定 ID | ID 保留为字符串字段；序列化不生成也不变更 | ID 为主键；INSERT/DELETE 模式保留 |
+| Unicode／中文 | `json.dumps(ensure_ascii=False, indent=2)`——UTF-8 文件，原文中文可见 | SQLite 默认以 UTF-8 存文本 |
+| 别名结构 | 嵌套别名对象列表；往返验证保留 `alias_id`、`text`、`notes` 为重建后 `CheckItem` 的元组 | 独立 `aliases` 表通过 FK 关联 `items`；JOIN 恢复关系 |
+| 保存原子性 | 同目录写 temp-new→fsync temp-new→copy primary→temp-backup+fsync→`os.replace`(temp-backup, .bak)→`os.replace`(temp-new, primary)。**新 primary 安装前永不移动旧 primary。** 新 primary 安装前的任一阶段失败，旧 primary 保持完整可加载。 | `BEGIN`→DELETE aliases→DELETE items→INSERT→COMMIT。SQLite 隐式事务保证全保存或全回滚 |
+| primary 损坏时的恢复 | `load_json_safe` 返回 `(data, source)`，source 为 `"primary"` 或 `"backup"`（`.bak` 与 primary 同目录）。永不静默替换损坏的 primary | 损坏数据库抛 `sqlite3.DatabaseError`；无内建 `.bak` 机制 |
+| 重启／加载 | 每次启动从磁盘反序列化；已验证：保存→从磁盘重新读取→加载结果与原 dataclass 相等 | 连接、SELECT 全部、重建；已验证相等 |
+| 权限拒绝 | 父目录不可写→保存时显式 `OSError`；不可读→加载时显式 `OSError` | 相同——sqlite3 在权限失败时抛出 |
+| 路径策略 | `probe_app_data_location()` 使用 `QStandardPaths.AppDataLocation`；已验证 Qt 环境下正常运行 | 相同——路径选择逻辑一致 |
+| 代码复杂度 | 约 180 行 probe 代码；单文件；仅使用标准库 | 约 160 行 probe 代码＋3 表 DDL＋FK 管理 |
+| 文件体积 | 小（3 项约 2 KB）；典型基准（约 100 项）约 20 KB | SQLite 页开销较大（空库约 12 KB, 3 项约 25 KB） |
+| 人工可读性 | 纯文本；任何文本编辑器可读/编辑 | 二进制；需 DB 浏览器或脚本检查 |
+
+### 测试用例与观察结果（56 项全部 PASS）
+
+**JSON 序列化**（12 项）：往返 dataclass 相等、中文 UTF-8 保留、别名结构为 `CheckItemAlias` 元组、稳定 ID 经序列化/反序列化保留、禁用项保留、空描述保留、schemaVersion 存在（通过）、缺失（ValueError）、类型错误（ValueError）、版本不支持（ValueError）、item 结构错误（ValueError）、必填字段缺失（ValueError）、字段类型错误（含非布尔 `enabled`）（ValueError）。
+
+**严格字段类型校验**（11 项）：非字符串 `item_id`/`code`/`name`/`detection_phrase`/`category`/`expected_description`/`notes`/`alias_id`/`alias_text`/`alias_notes` 被显式 `ValueError` 拒绝；非字典的 alias 条目被拒绝。
+
+**JSON 原子保存——成功路径**（6 项）：首次保存仅创建 primary（无 `.bak`）、多次保存保留最新值、v1→v2→v3 后 primary=v3 且 backup=v2、二次保存 `.bak` 含上一版本、无临时文件泄漏、UTF-8 含原文中文可见。
+
+**分阶段失败注入**（5 项）：备份准备 `_phase_replace(phase=1)` 失败→ primary 完整且 `.bak` 未触碰；最终替换 `_phase_replace(phase=2)` 失败→ primary 完整且 `.bak` 已更新为旧 primary；`json.dump` 失败→ primary 完整且 `.bak` 未触碰；`os.fsync` 失败→ primary 完整且 `.bak` 未触碰；`shutil.copyfileobj` 失败→ primary 完整且 `.bak` 未触碰。
+
+**JSON 恢复**（5 项）：primary 有效→使用 primary、primary 损坏＋backup 有效→使用 backup、primary 缺失＋backup 有效→使用 backup、两者均无效→抛异常、primary schemaVersion 不支持时**不**回退到 backup。
+
+**JSON 重启/加载**（3 项）：真实重启（保存→从磁盘全新读取→加载匹配）、稳定 ID 经保存-重载-保存循环保留、父目录自动创建。
+
+**SQLite 往返**（8 项）：所有字段含别名完整保留、Unicode 中文保留、别名 FK 关系恢复、稳定 ID 保留、禁用标志保留、事务性替换（DELETE+INSERT）正常、损坏数据库抛异常、注入 commit 失败（通过连接代理在 `.commit()` 上抛错）后回滚到 prior 状态。
+
+**JSON 注入失败**（1 项）：父目录创建失败→显式 `OSError` 传播。
+
+**权限拒绝**（2 项）：不可写父目录→JSON 抛 `OSError`；SQLite 同样。
+
+**Qt 路径探测**（1 项）：`QStandardPaths.AppDataLocation` 探测在 Qt 上下文下无错误运行。
+
+**重启加载完整性**（2 项）：JSON 保存→磁盘→加载保留 ID；SQLite 保存→关闭→重连→加载保留 ID。
+
+**SQLite 中断保存**（1 项）：pre-commit 失败触发回滚→ prior 基准完整保留。
+
+### 选定格式：JSON 文件
+
+基于证据的决策，非主观偏好。两种候选均通过全部测试；决策取决于哪种格式对实际数据形态更贴合已确立的约束：
+
+1. **一套基准，小数据量。** 产品存储一套本地检查清单基准。典型基准为数十至数百 `CheckItem`。SQLite 的事务能力对于几 KB 的单次原子保存属于过度设计，且页开销使文件体积膨胀 5–10 倍。
+
+2. **更简单的保存契约。** JSON 的 `(primary, .bak)` 配对加显式 `(data, source)` 返回元组可直接被 Task 5 的 UI 消费。SQLite 需要 rollback-journal 或 WAL 文件，加载时无"数据来自何处"的显式信号。
+
+3. **人工可读。** `ensure_ascii=False` 保持原文中文可见，利于调试和未来迁移。
+
+4. **Schema 演进更简单。** JSON 形状变更只需纯追加-忽略方式配合 `schemaVersion` 守卫。SQLite ALTER TABLE 迁移更复杂（加列简单，删/重命名需重建表）。
+
+5. **无锁复杂度。** SQLite 引入文件级锁，可能与未来并发读需求冲突。JSON 通过原子临时+替换模式防止并发写，无此顾虑。
+
+**选定 JSON。SQLite 保留为参考路径；若多基准或并发写需求出现，可重新评估。**
+
+### 选定路径策略
+
+保存位置：`QStandardPaths.AppDataLocation` 拼接 `"baseline.json"`。该路径在所有平台上解析为程序安装之外的用户可写目录（Windows: `%APPDATA%/<org>/<app>/`、macOS: `~/Library/Application Support/<org>/<app>/`、Linux: `~/.local/share/<org>/<app>/`）。探测验证 `QStandardPaths.AppDataLocation` 在 Qt 上下文下可用。
+
+### Schema 策略
+
+- `SCHEMA_VERSION = 1` 顶层整数字段（`"schemaVersion": 1`）。
+- `baselineId`: 本基准的字符串标识（不用于 item 内的身份匹配）。
+- `items`: 对象数组，每项含所有 `CheckItem` 字段加嵌套 `aliases` 数组（从 `CheckItemAlias` dataclass 扁平化）。
+- **稳定 `item_id` 和 `alias_id`**：视为不可变身份键，加载或序列化时永不自动生成。反序列化将列表重建为 `CheckItemAlias` 元组。
+- **严格验证**：缺失 `schemaVersion`、类型错误、版本不支持、必填字段缺失（`item_id`、`code`、`detection_phrase`）、类型错误（如非布尔 `enabled`、非列表 `aliases`）均抛 `ValueError`。无静默强制转换。
+
+### 保存算法（最终——修正 2026-09-22）
+
+```
+1. parent_dir.mkdir(parents=True, exist_ok=True)
+2. mkstemp(dir=parent_dir, prefix=".tmp_new_") → temp-new
+3. json.dump(data, temp-new_fh, ensure_ascii=False, indent=2)
+4. temp-new_fh.flush(); os.fsync(temp-new_fh.fileno()); close
+5. 若 primary 存在:
+     a. mkstemp(dir=parent_dir, prefix=".tmp_bak_") → temp-backup
+     b. copyfileobj(primary → temp-backup)
+     c. flush + fsync temp-backup
+     d. os.replace(temp-backup, primary + ".bak")   ← phase=1
+6. os.replace(temp-new, primary)                    ← phase=2
+```
+
+**首次方案的关键缺陷**：首次方案在最终替换（步骤 6）之前就执行了 `.bak` 重命名。若步骤 6 失败，旧 primary 已被移动到 `.bak`，但最终替换失败——primary 消失。修正方案**在安装新 primary 前永不移动旧 primary**。旧 primary 通过 copy（而非 move）到 temp-backup 快照，fsync 后 temp-backup 原子替换到 `.bak`。仅之后 temp-new 替换到 primary。
+
+阶段编号（通过 `_phase_replace` 包装器供测试注入）：
+- `phase=1`：步骤 5d——temp-backup 替换 `.bak`
+- `phase=2`：步骤 6——temp-new 替换 primary
+
+关键不变量：**现有 primary 在步骤 6 成功之前永不被修改或重命名**。到步骤 5 为止的每一阶段失败都保留现有 primary 完整可加载。步骤 6 失败也保留 primary 不变（步骤 5d 已将 `.bak` 更新为旧 primary，但 primary 仍持旧基准）。
+
+### 备份与恢复契约
+
+- `.bak` 与 primary 同目录——**非**独立备份目录。
+- `load_json_safe(primary_path)` 返回 `(data, source)`，source 为 `"primary"`、`"backup"` 或 `"both-corrupt"` 之一。
+- **永不静默替换损坏的 primary。** 调用方（Task 5 UI）必须决定：显示警告、提供备份选项、或两者均不可用时显式报错。
+- `.bak` 仅在覆盖已有 primary 时创建（首次保存无 `.bak`）。
+
+### 失败语义（原子性保证）
+
+| 失败阶段 | 观察结果 |
+|---|---|
+| `mkdir` 失败 | `OSError` 传播；primary 不受影响；无临时文件 |
+| temp-new `mkstemp` 失败 | `OSError` 传播；primary 不受影响 |
+| `json.dump` 失败（步骤 3） | `OSError` 传播；primary 不受影响；temp-new 清理 |
+| temp-new `fsync` 失败（步骤 4） | `OSError` 传播；primary 不受影响；temp-new 清理 |
+| temp-backup `mkstemp` 失败（步骤 5a） | `OSError` 传播；primary 不受影响；temp-new 清理；`.bak` 未触碰 |
+| `copyfileobj` 失败（步骤 5b） | `OSError` 传播；primary 不受影响；temp-new 清理；`.bak` 未触碰 |
+| temp-backup `fsync` 失败（步骤 5c） | `OSError` 传播；primary 不受影响；temp-new + temp-backup 清理；`.bak` 未触碰 |
+| `_phase_replace phase=1` 失败（步骤 5d） | `OSError` 传播；primary 不受影响；temp-new + temp-backup 清理；`.bak` 未触碰 |
+| `_phase_replace phase=2` 失败（步骤 6） | `OSError` 传播；**primary 不受影响**（关键不变量已被测试验证）；`.bak` 已更新为旧 primary（步骤 5d 成功）；temp-new 清理 |
+
+每条失败路径都保证 prior 基准仍可加载。phase-1 与 phase-2 替换失败通过 `_phase_replace` 包装器在 `tests/test_spike_persistence.py::TestPhaseSpecificFailureInjection` 独立验证——首次方案 blanket monkeypatch `os.replace` 会同时触发两个阶段，掩盖了 phase-2 的关键语义。
+
+### 剩余限制
+
+- 仅 macOS 开发机；Windows 证据仅限 CI。
+- 实验未覆盖并发写场景（一套基准设计明确排除）。
+- 除注入 `OSError` 外未做磁盘满测试。
+- `.bak` 每次被下次保存覆盖；无历史链（MVP 范围外）。
+
+**持久化验证：已执行。** 修正后的 JSON 原子保存方案（双临时文件、copy-not-move 备份、分阶段 replace 包装器）经 56 个通过测试选定。Task 5（基准管理与持久化）可在此基础上推进。
 
 ## 夹具与证据
 

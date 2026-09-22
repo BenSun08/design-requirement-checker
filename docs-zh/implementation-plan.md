@@ -197,10 +197,11 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 ## 任务 5 — 基准管理与持久化
 
+**前置证据：** 持久化验证实验已于（初次 2026-09-20，原子保存契约修正 2026-09-22）执行——见 `docs-zh/technical-spikes.md`。**选定格式：JSON 文件**（UTF-8、双临时文件原子保存：temp-new+fsync → copy primary→temp-backup+fsync → os.replace(temp-backup→.bak) → os.replace(temp-new→primary)——新 primary 安装前永不移动旧 primary；`.bak` 与 primary 同目录、`QStandardPaths.AppDataLocation/baseline.json`、严格 schema 校验、`schemaVersion = 1`、稳定 `item_id`／`alias_id`、加载时显式 `(data, source)` 返回元组）。56 项实验测试在 macOS 通过；同一套测试在 Windows CI 上作为门禁。
+
 **文件：**baseline_store.py、ui/checklist_dialog.py、application.py；tests/test_baseline_store.py、tests/test_ui.py。
 
-- [ ] 测试加载／保存／重启、无效 schema／数据、中断恢复、写入拒绝以及失败时保留旧基准。
-- [ ] 在已验证的用户可写、程序目录外位置实现选定格式。
+- [ ] 在 `src/baseline_store.py` 实现 JSON 加载／保存／重启，遵循 `docs/technical-spikes.md` 中已验证的契约（保存算法、恢复策略、严格校验、失败语义）。
 - [ ] 新增／编辑 code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled；拒绝重复 code，提示重复名称／重叠短语。
 - [ ] 提供禁用和确认删除，ID 稳定，允许空 expectedDescription。
 - [ ] 保存一套基准，使结果失效，重启重新加载；无订单／客户模板或同步。
