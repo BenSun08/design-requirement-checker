@@ -179,9 +179,9 @@ class TestEnabledActions:
             b.text() for b in buttons if not b.isEnabled() and b.text() not in self._FILTERS
         ]
         window.close()
-        assert enabled == ["导入 DOCX"]
+        assert sorted(enabled) == ["导入 DOCX", "检查项管理"]
         assert "开始核查" in disabled
-        assert "检查项管理" in disabled
+        assert "取消核查" in disabled
 
 
 class TestUiLifecycle:

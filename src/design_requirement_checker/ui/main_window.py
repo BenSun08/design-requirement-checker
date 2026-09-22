@@ -263,7 +263,7 @@ class MainWindow(QMainWindow):
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
         actions.addWidget(self._cancel_button)
         self._manage_button = QPushButton("检查项管理")
-        self._manage_button.setEnabled(False)
+        self._manage_button.clicked.connect(self._on_manage_clicked)
         actions.addWidget(self._manage_button)
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)  # indeterminate
@@ -640,7 +640,8 @@ class MainWindow(QMainWindow):
 
     def _update_actions(self) -> None:
         s = self._state
-        self._import_button.setEnabled(s not in (UiState.IMPORTING, UiState.VERIFYING))
+        idle_for_ui = s not in (UiState.IMPORTING, UiState.VERIFYING)
+        self._import_button.setEnabled(idle_for_ui)
         can_run = self._document is not None and self.has_check_items
         runnable_states = (
             UiState.READY,
@@ -651,7 +652,8 @@ class MainWindow(QMainWindow):
         self._run_button.setEnabled(can_run and s in runnable_states)
         # Cancel only applies to verification; import has no cooperative cancel.
         self._cancel_button.setEnabled(s is UiState.VERIFYING)
-        self._manage_button.setEnabled(False)
+        # Manage baseline is allowed whenever no background work is running.
+        self._manage_button.setEnabled(idle_for_ui)
 
     # --- background import --------------------------------------------------
 
@@ -781,6 +783,17 @@ class MainWindow(QMainWindow):
     def _on_cancel_clicked(self) -> None:
         if self._cancel_event is not None:
             self._cancel_event.set()
+
+    def _on_manage_clicked(self) -> None:
+        """Open the checklist management workspace.
+
+        T5.4 shell just renders the current snapshot. T5.5–T5.8 will wire
+        accept/reject back into baseline persistence and result invalidation.
+        """
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog(self._check_items, parent=self)
+        dialog.exec()
 
     def _on_verification_finished(self, outcome: VerificationOutcome, generation: int) -> bool:
         """Apply a verification outcome only if it is still current.
