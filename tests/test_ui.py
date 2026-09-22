@@ -5,14 +5,12 @@ list, one-based locations, strike formatting, LIMITED warnings, and explicit
 failure — with only implemented operations enabled.
 """
 
-import os
 import threading
 import time
 
 import fixture_factory as fixtures
-import pytest
 from PySide6.QtGui import QTextDocument
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QPushButton
 
 from design_requirement_checker.application import (
     ImportFailure,
@@ -168,13 +166,6 @@ def _result_with_evidence(
         rule_revision="r1",
         primary_evidence_id=evidence[0].evidence_id if evidence else "",
     )
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    os.environ["QT_QPA_PLATFORM"] = "offscreen"
-    application = QApplication.instance() or QApplication([])
-    yield application
 
 
 class TestEnabledActions:
