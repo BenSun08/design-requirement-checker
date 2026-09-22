@@ -444,8 +444,6 @@ class TestBaselineLifecycle:
         *,
         enabled: bool = True,
     ) -> CheckItem:
-        from design_requirement_checker.domain import CheckItemAlias
-
         return CheckItem(
             item_id=item_id,
             code=code,
