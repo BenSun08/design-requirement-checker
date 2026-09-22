@@ -1,10 +1,11 @@
 """Checklist management dialog (Task 5).
 
-This slice delivers the shell: a QTableWidget rendering the current baseline
-with code/name/category/detection_phrase/expected_description/enabled columns
-and a toolbar with Add button. Edit / enable-disable / delete / save flow land
-in later T5.x subtasks. The dialog is Qt-only; it talks to MainWindow via a
-returned immutable CheckItem tuple, never touches JSON or matching directly.
+Editable baseline workspace. The dialog renders the current snapshot in a
+QTableWidget, lets the reviewer Add/Edit items via ItemEditorDialog, and
+returns the updated immutable tuple to MainWindow on accept. Save /
+persistence / result invalidation live in later T5.x subtasks — this
+dialog only mutates its own in-memory working copy. Qt-only: never touches
+JSON or matching directly.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -38,12 +40,11 @@ _COLUMN_HEADERS = (
 
 
 class ChecklistDialog(QDialog):
-    """View and manage the current baseline.
+    """View and manage the current baseline in-memory working copy.
 
     ``items`` is the immutable snapshot passed from MainWindow on open.
-    Subtasks T5.5–T5.8 will wire up editing, persistence, and result
-    invalidation; this shell only renders. Closing with QDialog.Accepted
-    returns the current internal items tuple.
+    Closing with ``QDialog.Accepted`` signals MainWindow should publish
+    and persist; with ``Rejected`` the changes are discarded.
     """
 
     def __init__(self, items: Sequence[CheckItem], parent: QWidget | None = None) -> None:
@@ -52,22 +53,26 @@ class ChecklistDialog(QDialog):
         self.resize(1040, 640)
         self.setMinimumSize(800, 480)
 
-        # Working copy — edited items replace entries by item_id (T5.5).
         self._items: list[CheckItem] = list(items)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 14, 16, 14)
         outer.setSpacing(12)
 
-        header = QLabel("检查基准 — 可在后续版本中新增/编辑/删除检查项")
+        header = QLabel(
+            "编辑检查基准：新增、修改或调整每项的启用状态后点击“保存基准”以持久化。"
+        )
         header.setWordWrap(True)
         outer.addWidget(header)
 
         # Toolbar
         toolbar = QHBoxLayout()
         self._add_button = QPushButton("新增检查项")
-        self._add_button.setEnabled(False)  # T5.5 will wire this
+        self._add_button.clicked.connect(self._on_add)
         toolbar.addWidget(self._add_button)
+        self._edit_button = QPushButton("编辑")
+        self._edit_button.clicked.connect(self._on_edit_selected)
+        toolbar.addWidget(self._edit_button)
         toolbar.addStretch()
         outer.addLayout(toolbar)
 
@@ -82,16 +87,22 @@ class ChecklistDialog(QDialog):
         hdr.setStretchLastSection(True)
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self._populate_table()
+        self._table.doubleClicked.connect(lambda _index: self._on_edit_selected())
         outer.addWidget(self._table, 1)
 
         # Footer
         footer = QHBoxLayout()
-        count = QLabel(f"共 {len(self._items)} 项")
-        footer.addWidget(count)
+        self._count_label = QLabel(f"共 {len(self._items)} 项")
+        footer.addWidget(self._count_label)
         footer.addStretch()
-        self._close_button = QPushButton("关闭")
-        self._close_button.clicked.connect(self.reject)
-        footer.addWidget(self._close_button)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存基准")
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        footer.addWidget(buttons)
         outer.addLayout(footer)
 
     def _populate_table(self) -> None:
@@ -108,6 +119,51 @@ class ChecklistDialog(QDialog):
             self._table.setItem(row, 5, cell)
             self._table.setItem(row, 6, QTableWidgetItem(item.notes))
 
+    def _refresh_table(self) -> None:
+        self._populate_table()
+        self._count_label.setText(f"共 {len(self._items)} 项")
+
     def current_items(self) -> tuple[CheckItem, ...]:
         """Return the current working snapshot (immutable tuple)."""
         return tuple(self._items)
+
+    # ------------------------------------------------------------------
+    # Add / edit
+    # ------------------------------------------------------------------
+
+    def _item_at_row(self, row: int) -> CheckItem | None:
+        if 0 <= row < len(self._items):
+            return self._items[row]
+        return None
+
+    def _selected_row(self) -> int:
+        row = self._table.currentRow()
+        return row if row >= 0 else -1
+
+    def _on_add(self) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(existing=None, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        candidate = dialog.candidate()
+        if candidate is None:
+            return
+        self._items.append(candidate)
+        self._refresh_table()
+
+    def _on_edit_selected(self) -> None:
+        row = self._selected_row()
+        existing = self._item_at_row(row)
+        if existing is None:
+            return
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(existing=existing, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        candidate = dialog.candidate()
+        if candidate is None:
+            return
+        self._items[row] = candidate
+        self._refresh_table()
