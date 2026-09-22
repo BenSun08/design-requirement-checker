@@ -149,16 +149,29 @@ class ItemEditorDialog(QDialog):
         self.accept()
 
     def _build_aliases(self, new_texts: Sequence[str]) -> tuple[CheckItemAlias, ...]:
-        """Preserve alias_ids whose text content is unchanged."""
+        """Preserve ``alias_id`` *and* ``notes`` for aliases whose text is unchanged.
+
+        A plain edit of ``category`` or ``name`` must never silently drop
+        alias metadata — every alias that stays in the editor with the
+        same text keeps its existing identity and notes verbatim. New
+        alias texts get a fresh ``alias_id`` and empty notes (the UI
+        currently does not expose alias-note editing, so ``notes=""``
+        is acceptable for genuinely-new aliases).
+        """
         if self._existing is None:
             return tuple(
                 CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes="") for t in new_texts
             )
 
-        # Map existing alias text → alias_id
-        existing_by_text = {a.text: a.alias_id for a in self._existing.aliases}
+        # Map existing alias text → full CheckItemAlias (preserves both
+        # alias_id and notes; if there are duplicate alias texts in the
+        # existing list the last one wins — we rebuild anyway).
+        existing_by_text = {a.text: a for a in self._existing.aliases}
         result: list[CheckItemAlias] = []
         for t in new_texts:
-            aid = existing_by_text.get(t, uuid.uuid4().hex)
-            result.append(CheckItemAlias(alias_id=aid, text=t, notes=""))
+            existing = existing_by_text.get(t)
+            if existing is not None:
+                result.append(existing)
+            else:
+                result.append(CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes=""))
         return tuple(result)
