@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -826,13 +827,100 @@ class MainWindow(QMainWindow):
     def _on_manage_clicked(self) -> None:
         """Open the checklist management workspace.
 
-        T5.4 shell just renders the current snapshot. T5.5–T5.8 will wire
-        accept/reject back into baseline persistence and result invalidation.
+        On Accept: validate → persist → publish → invalidate old results.
+        On Reject (including the Close button): discard changes, leave
+        everything untouched. Persistence errors leave the old baseline and
+        old results in place — only a successful save mutates state.
         """
+        from design_requirement_checker.application import (
+            save_baseline_to,
+            validate_baseline,
+        )
+        from design_requirement_checker.baseline_store import default_path
         from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
 
         dialog = ChecklistDialog(self._check_items, parent=self)
-        dialog.exec()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_items = dialog.current_items()
+        validation = validate_baseline(new_items)
+
+        # --- Validation errors block save entirely ---
+        if validation.errors:
+            from PySide6.QtWidgets import QMessageBox
+
+            msg = "；".join(e.message for e in validation.errors)
+            QMessageBox.critical(
+                self,
+                "检查基准无法保存",
+                f"存在硬错误必须修复后才能保存：\n{msg}",
+            )
+            self.statusBar().showMessage("基准校验未通过 — 未保存")
+            return
+
+        # --- Warnings are visible but do not block ---
+        if validation.warnings:
+            from PySide6.QtWidgets import QMessageBox
+
+            warn_text = "\n".join(f"· {w.message}" for w in validation.warnings)
+            reply = QMessageBox.warning(
+                self,
+                "基准存在警告",
+                f"以下警告不会阻止保存，但建议人工复核：\n\n{warn_text}\n\n仍要保存吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply is not QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage("已取消保存")
+                return
+
+        # --- Persist first; only after success do we publish ---
+        try:
+            baseline_path = default_path()
+            save_baseline_to(baseline_path, new_items, self._baseline_id)
+        except (OSError, ValueError) as exc:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(
+                self,
+                "基准保存失败",
+                f"磁盘写入错误：{exc}\n\n旧基准和核查结果未受影响。",
+            )
+            self.statusBar().showMessage("基准保存失败 — 未变更")
+            return
+
+        # --- Publish: mutate snapshot + invalidate stale results ---
+        self.set_check_items(new_items, self._baseline_id)
+        self.statusBar().showMessage(
+            "检查基准已变更 — 请重新核查以生成新结果"
+        )
+
+    def set_check_items(
+        self,
+        items: tuple[CheckItem, ...],
+        baseline_id: str = "",
+    ) -> None:
+        """Publish a new baseline snapshot and invalidate existing results.
+
+        Called after a successful save (T5.8) or after startup load (T5.7).
+        Increments the op generation so any in-flight verification workers
+        are discarded on completion. Clears results + detail view but keeps
+        the document and current state (READY if a document exists, EMPTY
+        otherwise).
+        """
+        self._op_generation += 1
+        self._check_items = items
+        if baseline_id:
+            self._baseline_id = baseline_id
+        self._results = ()
+        self._result_list.clear()
+        self._detail_view.clear()
+        if self._document is not None:
+            self._state = UiState.READY
+        else:
+            self._state = UiState.EMPTY
+        self._update_actions()
 
     def _on_verification_finished(self, outcome: VerificationOutcome, generation: int) -> bool:
         """Apply a verification outcome only if it is still current.
