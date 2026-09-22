@@ -197,6 +197,11 @@ def _validate_primary_for_backup(primary_path: Path) -> bool:
 
     A corrupt-but-existing primary must NOT become the .bak source on the next
     save — the existing valid .bak would be overwritten by garbage.
+
+    An existing primary with an *unsupported* schemaVersion is neither valid
+    nor corrupt: the error propagates so :func:`save_baseline` aborts before
+    touching primary or backup. Overwriting a file written by a newer
+    application version is a compatibility violation, not recovery.
     """
     if not primary_path.exists():
         return False
@@ -205,6 +210,8 @@ def _validate_primary_for_backup(primary_path: Path) -> bool:
         parsed = json.loads(raw)
         deserialize_baseline(parsed)
         return True
+    except UnsupportedBaselineSchemaError:
+        raise
     except (OSError, json.JSONDecodeError, ValueError):
         return False
 
@@ -246,6 +253,10 @@ def save_baseline(
 
     Raises:
         OSError: on mkdir, write, fsync, or replace failures.
+        UnsupportedBaselineSchemaError: when the existing primary was written
+            with a schemaVersion this build does not understand. Primary and
+            backup are left byte-identical — a direct production caller
+            cannot silently overwrite unsupported-schema data.
         ValueError: on validation defects in the serialized data shape,
             including an empty ``baseline_id`` — the persistence layer will
             never write an empty identity even if higher layers regress.

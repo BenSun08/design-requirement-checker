@@ -705,3 +705,86 @@ class TestUnsupportedSchemaDoesNotFallBack:
         result = load_baseline_from(primary)
         assert not result.ok
         assert result.source == "load-error"
+
+
+# ---------------------------------------------------------------------------
+# R5.6 — SAVE must not overwrite unsupported-schema data
+# ---------------------------------------------------------------------------
+
+
+class TestUnsupportedSchemaSaveProtection:
+    """save_baseline over a newer-schema primary is a compatibility violation.
+
+    Distinct from the LOAD tests above: here a direct production call to
+    save_baseline must refuse to modify either file.
+    """
+
+    def _make_schema_file(self, path: Path, schema_version: int, bid: str) -> None:
+        data = {
+            "schemaVersion": schema_version,
+            "baselineId": bid,
+            "items": [
+                {
+                    "item_id": "i1",
+                    "code": "C",
+                    "name": "N",
+                    "detection_phrase": "P",
+                    "category": "",
+                    "expected_description": "",
+                    "enabled": True,
+                    "notes": "",
+                    "aliases": [],
+                }
+            ],
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_save_over_unsupported_schema_raises_and_modifies_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
+
+        primary = tmp_path / "baseline.json"
+        backup = Path(str(primary) + ".bak")
+        self._make_schema_file(primary, 999, "future")
+        self._make_schema_file(backup, 1, "old-valid")
+        primary_before = primary.read_bytes()
+        backup_before = backup.read_bytes()
+
+        with pytest.raises(UnsupportedBaselineSchemaError, match="999"):
+            save_baseline(primary, (_item("new-item"),), "current")
+
+        assert primary.read_bytes() == primary_before
+        assert backup.read_bytes() == backup_before
+        leaked = [p.name for p in tmp_path.iterdir() if p.name.startswith(".tmp_")]
+        assert leaked == [], f"temp files leaked: {leaked}"
+
+    def test_save_over_unsupported_schema_without_backup(self, tmp_path: Path) -> None:
+        from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
+
+        primary = tmp_path / "baseline.json"
+        self._make_schema_file(primary, 999, "future")
+        primary_before = primary.read_bytes()
+
+        with pytest.raises(UnsupportedBaselineSchemaError):
+            save_baseline(primary, (_item("new-item"),), "current")
+
+        assert primary.read_bytes() == primary_before
+        assert not Path(str(primary) + ".bak").exists()
+        leaked = [p.name for p in tmp_path.iterdir() if p.name.startswith(".tmp_")]
+        assert leaked == []
+
+    def test_save_over_corrupt_primary_still_allowed_explicit_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        """Ordinary corruption keeps the existing explicit-recovery semantics —
+        save installs a new primary (skipping backup prep from corrupt data)."""
+        primary = tmp_path / "baseline.json"
+        primary.write_bytes(b"{corrupt garbage")
+
+        save_baseline(primary, (_item("fresh"),), "recovery-bid")
+
+        items, bid, source = load_baseline(primary)
+        assert source is BaselineLoadSource.PRIMARY
+        assert bid == "recovery-bid"
+        assert [i.item_id for i in items] == ["fresh"]
