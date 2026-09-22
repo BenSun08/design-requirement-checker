@@ -219,13 +219,18 @@ def format_blocks_html(document: Document) -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, check_items: Sequence[CheckItem] = ()) -> None:
+    def __init__(
+        self,
+        check_items: Sequence[CheckItem] = (),
+        baseline_id: str = "",
+    ) -> None:
         super().__init__()
         self.setWindowTitle("设计需求核查工具")
         self.resize(1440, 900)
         self.setMinimumSize(1024, 600)
 
         self._check_items: tuple[CheckItem, ...] = tuple(check_items)
+        self._baseline_id: str = baseline_id
         self._document: Document | None = None
         self._results: tuple[CheckResult, ...] = ()
         self._state: UiState = UiState.EMPTY
@@ -245,7 +250,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         notice = QLabel(
-            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。检查项管理在后续任务中实现。"
+            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。"
+            "点击 “检查项管理” 可编辑基准内容。"
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -277,6 +283,9 @@ class MainWindow(QMainWindow):
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
         self._warnings_label.setVisible(False)
+        self._baseline_banner = QLabel("")
+        self._baseline_banner.setWordWrap(True)
+        self._baseline_banner.setVisible(False)
 
         # Summary + search strip.
         strip = QHBoxLayout()
@@ -289,6 +298,7 @@ class MainWindow(QMainWindow):
         self._search_input.textChanged.connect(self._populate_results)
         strip.addWidget(self._search_input)
         layout.addLayout(strip)
+        layout.addWidget(self._baseline_banner)
 
         # Filter buttons.
         self._current_filter = "全部"
@@ -321,7 +331,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._search_input.setFocus)
-        self.statusBar().showMessage("尚未导入文档")
+        if self._check_items:
+            self.statusBar().showMessage(
+                f"已加载 {len(self._check_items)} 项检查基准"
+            )
+        else:
+            self.statusBar().showMessage(
+                "尚未加载检查基准 — 点击检查项管理以配置"
+            )
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
@@ -401,6 +418,28 @@ class MainWindow(QMainWindow):
         self._update_summary()
         self._update_actions()
         return True
+
+    # --- Baseline startup / recovery UX (Task 5) -------------------------
+
+    def set_baseline_recovered(self, message: str) -> None:
+        """Show a persistent warning that the baseline came from backup."""
+        self._baseline_banner.setStyleSheet(
+            "background-color: #fff3cd; color: #856404; padding: 6px 10px;"
+        )
+        self._baseline_banner.setText(message)
+        self._baseline_banner.setVisible(True)
+
+    def set_baseline_failure(self, message: str) -> None:
+        """Show an explicit compatibility / load failure banner."""
+        self._baseline_banner.setStyleSheet(
+            "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+        )
+        self._baseline_banner.setText(
+            f"检查基准加载失败：{message}\n"
+            f"请检查 AppData 目录权限或重新配置基准。"
+        )
+        self._baseline_banner.setVisible(True)
+        self.statusBar().showMessage("检查基准加载失败")
 
     # --- result summary & ordering -----------------------------------------
 
