@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -73,6 +74,12 @@ class ChecklistDialog(QDialog):
         self._edit_button = QPushButton("编辑")
         self._edit_button.clicked.connect(self._on_edit_selected)
         toolbar.addWidget(self._edit_button)
+        self._toggle_button = QPushButton("切换启用/禁用")
+        self._toggle_button.clicked.connect(self._on_toggle_enabled)
+        toolbar.addWidget(self._toggle_button)
+        self._delete_button = QPushButton("删除")
+        self._delete_button.clicked.connect(self._on_delete_selected)
+        toolbar.addWidget(self._delete_button)
         toolbar.addStretch()
         outer.addLayout(toolbar)
 
@@ -166,4 +173,40 @@ class ChecklistDialog(QDialog):
         if candidate is None:
             return
         self._items[row] = candidate
+        self._refresh_table()
+
+    def _on_toggle_enabled(self) -> None:
+        row = self._selected_row()
+        existing = self._item_at_row(row)
+        if existing is None:
+            return
+        self._items[row] = CheckItem(
+            item_id=existing.item_id,
+            code=existing.code,
+            name=existing.name,
+            detection_phrase=existing.detection_phrase,
+            aliases=existing.aliases,
+            category=existing.category,
+            expected_description=existing.expected_description,
+            enabled=not existing.enabled,
+            notes=existing.notes,
+        )
+        self._refresh_table()
+
+    def _on_delete_selected(self) -> None:
+        row = self._selected_row()
+        existing = self._item_at_row(row)
+        if existing is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定删除检查项 “{existing.code} · {existing.name}” 吗？\n"
+            f"此操作不可撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply is not QMessageBox.StandardButton.Yes:
+            return
+        del self._items[row]
         self._refresh_table()
