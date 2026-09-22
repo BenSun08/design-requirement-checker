@@ -294,6 +294,8 @@ class TestLoadRecovery:
             load_baseline(primary)
 
     def test_unsupported_schema_primary_not_fallback(self, tmp_path: Path) -> None:
+        from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
+
         primary = tmp_path / "baseline.json"
         Path(str(primary) + ".bak").write_text(
             json.dumps(
@@ -306,7 +308,9 @@ class TestLoadRecovery:
             encoding="utf-8",
         )
         primary.write_bytes(b"not json")
-        with pytest.raises(ValueError, match="both primary"):
+        # primary corrupt → backup consulted → backup has unsupported schema
+        # → compatibility error, not "both invalid".
+        with pytest.raises(UnsupportedBaselineSchemaError, match="999"):
             load_baseline(primary)
 
 
@@ -600,3 +604,106 @@ class TestFirstLaunchBaselineIdentity:
         assert source is BaselineLoadSource.BACKUP
         assert bid == "recoverable-bid"
         assert items[0].item_id == "bak-item"
+
+
+# ---------------------------------------------------------------------------
+# R5.3 — Unsupported schema must NOT fall back to backup
+# ---------------------------------------------------------------------------
+
+
+class TestUnsupportedSchemaDoesNotFallBack:
+    """Regression: schemaVersion mismatch is a compatibility failure, not
+    a corrupt file. The backup path must NOT be consulted when primary's
+    schema is explicitly unsupported — that would silently load older data
+    the user never asked for."""
+
+    def _make_schema_file(self, path: Path, schema_version: int) -> None:
+        data = {
+            "schemaVersion": schema_version,
+            "baselineId": "bid-1",
+            "items": [
+                {
+                    "item_id": "i1",
+                    "code": "C",
+                    "name": "N",
+                    "detection_phrase": "P",
+                    "category": "",
+                    "expected_description": "",
+                    "enabled": True,
+                    "notes": "",
+                    "aliases": [],
+                }
+            ],
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_primary_unsupported_raises_does_not_use_backup(self, tmp_path: Path) -> None:
+        from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
+
+        primary = tmp_path / "baseline.json"
+        backup = Path(str(primary) + ".bak")
+        # Valid backup (schema v1)
+        self._make_schema_file(backup, 1)
+        # Primary has schema v999 — explicitly newer/downgrade scenario
+        self._make_schema_file(primary, 999)
+
+        with pytest.raises(UnsupportedBaselineSchemaError, match="999"):
+            load_baseline(primary)
+
+    def test_primary_corrupt_backup_valid_uses_backup(self, tmp_path: Path) -> None:
+        """The other path must remain clearly distinct — corrupt primary
+        + valid backup IS recovered from backup."""
+        primary = tmp_path / "baseline.json"
+        backup = Path(str(primary) + ".bak")
+        self._make_schema_file(backup, 1)
+        primary.write_bytes(b"corrupt garbage!!!")
+
+        items, bid, source = load_baseline(primary)
+        assert source is BaselineLoadSource.BACKUP
+        assert bid == "bid-1"
+        assert items[0].item_id == "i1"
+
+    def test_primary_missing_backup_unsupported_raises(self, tmp_path: Path) -> None:
+        from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
+
+        primary = tmp_path / "baseline.json"
+        backup = Path(str(primary) + ".bak")
+        primary.unlink(missing_ok=True)
+        self._make_schema_file(backup, 999)
+
+        with pytest.raises(UnsupportedBaselineSchemaError):
+            load_baseline(primary)
+
+    def test_both_corrupt_raises_valueerror(self, tmp_path: Path) -> None:
+        primary = tmp_path / "baseline.json"
+        backup = Path(str(primary) + ".bak")
+        primary.write_bytes(b"{garbage")
+        backup.write_bytes(b"{also garbage")
+
+        with pytest.raises(ValueError, match="both primary"):
+            load_baseline(primary)
+
+    def test_application_wraps_unsupported_schema_as_distinct_token(
+        self, tmp_path: Path
+    ) -> None:
+        """application.load_baseline_from produces source='unsupported-schema'
+        for compatibility failures, distinct from 'load-error'."""
+        from design_requirement_checker.application import load_baseline_from
+
+        primary = tmp_path / "baseline.json"
+        self._make_schema_file(primary, 999)
+
+        result = load_baseline_from(primary)
+        assert not result.ok
+        assert result.source == "unsupported-schema"
+        assert "999" in (result.error or "")
+
+    def test_application_wraps_generic_failure_as_load_error(self, tmp_path: Path) -> None:
+        from design_requirement_checker.application import load_baseline_from
+
+        primary = tmp_path / "baseline.json"
+        primary.write_bytes(b"{corrupt!!!")
+
+        result = load_baseline_from(primary)
+        assert not result.ok
+        assert result.source == "load-error"

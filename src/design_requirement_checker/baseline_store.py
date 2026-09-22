@@ -48,6 +48,16 @@ class BaselineLoadSource(Enum):
     BACKUP = "backup"
 
 
+class UnsupportedBaselineSchemaError(ValueError):
+    """Raised when a persisted baseline has a schemaVersion we do not understand.
+
+    Distinct from generic corrupt/invalid structure. A file with the wrong
+    schema version must NOT trigger backup recovery — it signals a
+    forward-compatibility or downgrade scenario that needs explicit user
+    handling, not silent side-stepping.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Strict serialization helpers
 # ---------------------------------------------------------------------------
@@ -153,7 +163,9 @@ def deserialize_baseline(data: dict[str, Any]) -> tuple[str, tuple[CheckItem, ..
     if not isinstance(sv, int):
         raise ValueError("schemaVersion must be an integer")
     if sv != SCHEMA_VERSION:
-        raise ValueError(f"unsupported schemaVersion: {sv} (expected {SCHEMA_VERSION})")
+        raise UnsupportedBaselineSchemaError(
+            f"unsupported schemaVersion: {sv} (expected {SCHEMA_VERSION})"
+        )
 
     bid = data.get("baselineId")
     if not isinstance(bid, str) or not bid:
@@ -293,12 +305,19 @@ def save_baseline(
 
 
 def _try_load_file(path: Path) -> dict[str, Any] | None:
-    """Return parsed JSON dict if ``path`` exists AND valid; else None."""
+    """Return parsed JSON dict if ``path`` exists AND valid; else None.
+
+    Lets :class:`UnsupportedBaselineSchemaError` bubble so the caller can
+    distinguish a forward-compatibility/downgrade scenario from mundane
+    corrupt/missing files.
+    """
     try:
         raw = path.read_text(encoding="utf-8")
         parsed: dict[str, Any] = json.loads(raw)
         deserialize_baseline(parsed)
         return parsed
+    except UnsupportedBaselineSchemaError:
+        raise
     except (OSError, json.JSONDecodeError, ValueError):
         return None
 
@@ -314,11 +333,16 @@ def load_baseline(
     Behavior:
       - Both missing → ``source=NO_BASELINE``, empty items, empty baseline_id.
       - Primary valid → ``source=PRIMARY``.
-      - Primary missing/invalid + backup valid → ``source=BACKUP``.
-      - Both invalid → raises ``ValueError``.
-      - Unsupported schemaVersion (on either file) → raises ``ValueError``
-        (never silently falls through to the other file when its schema
-        version is explicitly wrong rather than just corrupt).
+      - Primary missing/corrupt + backup valid → ``source=BACKUP``.
+      - Primary exists with unsupported schemaVersion → raises
+        :class:`UnsupportedBaselineSchemaError` (never silently falls back
+        to backup — a forward-compatibility / downgrade scenario must be
+        surfaced explicitly).
+      - Primary corrupt + backup exists with unsupported schemaVersion →
+        raises :class:`UnsupportedBaselineSchemaError` (no silent fallback
+        to primary).
+      - Both exist but neither is loadable → raises ``ValueError`` (generic
+        corrupt/missing case, distinct from the compatibility error above).
 
     Never silently rewrites corrupt files.
     """

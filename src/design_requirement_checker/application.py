@@ -301,11 +301,29 @@ def load_baseline_from(path: Path) -> BaselineLoadResult:
     failure into an explicit error rather than propagating exceptions. On
     success returns the item tuple (immutable snapshot), baseline_id, and
     the source token indicating whether it came from primary or backup.
+
+    Source tokens on failure:
+
+      - ``unsupported-schema`` — file exists but schemaVersion is newer
+        than this build understands (downgrade scenario, not a corrupt
+        data case). Backup is NOT consulted.
+      - ``load-error`` — generic load failure (corrupt + corrupt, OSError,
+        etc.). May or may not have consulted backup depending on state.
     """
-    from design_requirement_checker.baseline_store import load_baseline
+    from design_requirement_checker.baseline_store import (
+        UnsupportedBaselineSchemaError,
+        load_baseline,
+    )
 
     try:
         items, baseline_id, source = load_baseline(Path(path))
+    except UnsupportedBaselineSchemaError as exc:
+        return BaselineLoadResult(
+            items=None,
+            baseline_id=None,
+            source="unsupported-schema",
+            error=str(exc),
+        )
     except (OSError, ValueError) as exc:
         return BaselineLoadResult(
             items=None,
