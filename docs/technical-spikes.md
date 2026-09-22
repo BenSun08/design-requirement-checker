@@ -2,7 +2,7 @@
 
 [简体中文版](../docs-zh/technical-spikes.md)
 
-Status: **S1/S2 EXECUTED 2026-09-18 and S6 EXECUTED 2026-09-19 on the macOS development machine — see "Executed evidence" below. S3 and persistence validation remain PLANNED, NOT EXECUTED.** The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize further probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
+Status: **S1/S2 EXECUTED 2026-09-18, S6 EXECUTED 2026-09-19, and persistence validation EXECUTED (initial 2026-09-20, corrected atomic-save contract 2026-09-22) on the macOS development machine — see "Executed evidence" below. S3 remains PLANNED, NOT EXECUTED.** The owner has selected the production stack and confirmed product rules 1–7. Targets: Windows 10/11 x64, users without administrator/installation privileges. This document defines bounded validation inside the selected stack; it does not authorize further probes or production implementation. Timeboxes are effort caps, not delivery promises, with approximately eight hours/week available.
 
 Development and CI use the same Python 3.13/PySide6 source on macOS and Windows.
 Production remains Windows 10/11 x64. Windows packages are built on Windows only;
@@ -425,9 +425,150 @@ behavior, comparison independence, scale viability, cancellation granularity
 and determinism are established above. Task 3 remains its own slice, pending
 explicit authorization; this spike does not implement it.
 
-## Persistence validation inside the selected stack
+## Executed evidence — baseline persistence validation (initial 2026-09-20, corrected atomic-save contract 2026-09-22)
 
-Before checklist persistence implementation, compare the smallest viable local data formats for one baseline. Validate stable IDs, required detectionPhrase, Unicode, atomic save/recovery, permission failures, schema identification and restart. Use a user-writable application-data location separate from program files; no shared database service. Select a format in a short recorded decision, with a 1–2 h initial cap. This does not add multi-baseline or version-management features.
+Executed as one bounded spike on the macOS development machine. No production
+`src/` files were modified; all code lives under `tests/`. Two candidates were
+compared: **JSON file** (UTF-8, temp-file + atomic replace) and **SQLite**
+(stdlib sqlite3, minimal 3-table schema). The domain model from `src/domain.py`
+defines `CheckItem` and `CheckItemAlias` (separate frozen dataclasses with
+stable `item_id` / `alias_id` identities).
+
+### Environment
+
+- OS: macOS 26.7 (x86_64); development platform only, not the production target.
+- Python 3.13.7; PySide6 6.11.2; pytest 9.1.1.
+- Spike code: `tests/persistence_probe.py` (serialization helpers for both
+  candidates) and `tests/test_spike_persistence.py` (42 hand-labelled tests).
+- Windows evidence: GitHub CI runs the same tests on `windows-latest` — this is
+  source-level gate coverage, not S3 deployment evidence.
+
+### Candidate formats compared
+
+| Criterion | JSON candidate | SQLite candidate |
+|---|---|---|
+| Schema identification | `schemaVersion` integer field at top level; raises `ValueError` if missing, wrong type, or unsupported value | `schemaVersion` row in `baseline_meta` table; schema itself is fixed SQL |
+| Stable CheckItem IDs | IDs preserved as string fields; serialization never generates or mutates them | IDs are primary keys; INSERT/DELETE pattern preserves them |
+| Unicode / Chinese | `json.dumps(ensure_ascii=False, indent=2)` — UTF-8 file with raw Chinese characters visible | SQLite stores text as UTF-8 by default |
+| Alias structure | Nested list of alias objects; round-trip verified to preserve `alias_id`, `text`, `notes` as tuples in the reconstructed `CheckItem` | Separate `aliases` table with FK to `items`; JOIN recovers relationship |
+| Save atomicity | Write temp-new in same directory → fsync temp-new → copy primary→temp-backup+fsync → os.replace(temp-backup, .bak) → os.replace(temp-new, primary). **Primary is never moved away before the new primary is installed.** Failure at any phase before the final `temp-new→primary` replace leaves the existing primary untouched and loadable. | `BEGIN` → DELETE aliases → DELETE items → INSERT → COMMIT. SQLite's implicit transaction guarantees either full save or full rollback |
+| Recovery on corrupt primary | `load_json_safe` returns `(data, source)` where source is `"primary"` or `"backup"` (`.bak` alongside primary). Never silently replaces corrupt primary — caller decides | Corrupt database raises `sqlite3.DatabaseError`; no `.bak` mechanism built-in |
+| Restart / load | Deserialize from disk each launch; verified: save → parse fresh from disk → load yields identical dataclass | Connect, SELECT all, reconstruct; verified identical |
+| Permission denial | Parent dir unwritable → explicit `OSError` on save; unreadable → explicit `OSError` on load | Same — sqlite3 raises on permission failure |
+| Location strategy | `probe_app_data_location()` uses `QStandardPaths.AppDataLocation`; verified runs without error | Same — identical path selection |
+| Code complexity | ~180 lines of probe code; one file; standard library only | ~160 lines of probe code + 3-table DDL + FK management |
+| File size | Small (~2 KB for 3 items); compact for typical baselines (~100 items ≈ 20 KB) | Larger due to SQLite page overhead (~12 KB empty, ~25 KB for 3 items) |
+| Human inspection | Plain text; users can read/edit with any text editor | Binary; requires DB browser or script to inspect |
+
+### Test cases and observed results (56 tests, all PASS)
+
+**JSON serialization — R1** (12 tests): round-trip equality, Chinese UTF-8 preservation, alias structure as tuple of `CheckItemAlias`, stable IDs survive serialize/deserialize, disabled item preserved, empty description preserved, schemaVersion present (pass), missing (ValueError), wrong type (ValueError), unsupported version (ValueError), wrong item shape (ValueError), missing required field (ValueError), wrong field types including non-boolean `enabled` (ValueError).
+
+**Strict serialization validation — R4** (11 tests): non-string `item_id`/`code`/`name`/`detection_phrase`/`category`/`expected_description`/`notes`/`alias_id`/`alias_text`/`alias_notes` rejected with explicit `ValueError` including field path; alias entries that aren't dict objects rejected.
+
+**JSON atomic save — success paths** (6 tests): first save creates primary only (no `.bak`), repeated saves keep latest, v1→v2→v3 yields primary=v3/backup=v2, second save creates `.bak` with immediately previous baseline, no temp files leaked, UTF-8 readable with raw Chinese characters.
+
+**Phase-specific failure injection** (5 tests): backup-prep `_phase_replace(phase=1)` failure → primary untouched + `.bak` absent, final-primary `_phase_replace(phase=2)` failure → primary untouched + `.bak` updated with old primary, `json.dump` failure → primary untouched + `.bak` absent, `os.fsync` failure → primary untouched + `.bak` absent, `shutil.copyfileobj` failure → primary untouched + `.bak` absent.
+
+**JSON recovery** (5 tests): primary valid → uses primary, primary corrupt + backup valid → uses backup, primary missing + backup valid → uses backup, both invalid → raises, unsupported schemaVersion on primary does NOT fall through to backup.
+
+**JSON restart/load** (3 tests): true restart (save → fresh disk read → load matches), stable IDs survive save-reload-save cycle, parent directory auto-created.
+
+**SQLite round-trip** (8 tests): all fields including aliases preserved, Unicode Chinese preserved, alias FK relationship recovered, stable IDs preserved, disabled flag preserved, transactional replace (DELETE+INSERT) works, corrupt database raises, injected commit failure (via connection proxy that raises on `.commit()`) rolls back to prior state.
+
+**JSON injected failures** (1 test): parent directory creation failure → explicit `OSError` propagated.
+
+**Permission denial** (2 tests): unwritable parent dir → `OSError` for JSON; same for SQLite.
+
+**Qt location probe** (1 test): `QStandardPaths.AppDataLocation` probe runs without error in a Qt context.
+
+**Restart load integrity** (2 tests): JSON save→disk→load preserves IDs; SQLite save→close→reconnect→load preserves IDs.
+
+**SQLite interrupted save** (1 test): pre-commit failure triggers rollback → prior baseline intact.
+
+### SELECTED format: JSON file
+
+Evidence-based decision, not preference. Both candidates pass every test; the decision hinges on which format fits the stated constraints better for the actual data shape:
+
+1. **One baseline, small data.** The product stores one local checklist baseline. Typical baselines are dozens to at most a few hundred `CheckItem`s. SQLite's transactional power is overkill for one atomic save of a few KB, and its page overhead inflates the file 5–10× compared to JSON.
+
+2. **Simpler save contract.** JSON's `(primary, .bak)` pair with explicit `(data, source)` return tuple is directly consumable by Task 5's UI. SQLite requires a rollback-journal or WAL file alongside the DB, with no explicit "where did this come from" signal on load.
+
+3. **Human-readable.** JSON with `ensure_ascii=False` keeps the original Chinese text visible in plain text, which helps debugging and future migration.
+
+4. **Schema evolution is simpler.** Changing the JSON shape is a pure add-and-ignore approach with `schemaVersion` guards. SQLite ALTER TABLE migrations are more complex (add column is easy, remove/rename needs table rebuild).
+
+5. **No locking complexity.** SQLite introduces file-level locking which can conflict if a future process needs concurrent read access. JSON has no such concern — concurrent writes are already prevented by the atomic temp+replace pattern.
+
+**JSON is selected. SQLite is retained as a reference path and can be revisited if multi-baseline or concurrent-write requirements emerge.**
+
+### SELECTED path strategy
+
+Save location: `QStandardPaths.AppDataLocation` joined with `"baseline.json"`. This resolves to a user-writable directory outside the program installation on all platforms (Windows: `%APPDATA%/<org>/<app>/`, macOS: `~/Library/Application Support/<org>/<app>/`, Linux: `~/.local/share/<org>/<app>/`). The probe verifies that `QStandardPaths.AppDataLocation` is available without error in a Qt context.
+
+### Schema strategy
+
+- `SCHEMA_VERSION = 1` integer field at top level (`"schemaVersion": 1`).
+- `baselineId`: string identifier for this baseline (not used for identity matching inside items).
+- `items`: array of objects, each containing every `CheckItem` field plus a nested `aliases` array (flattened from `CheckItemAlias` dataclasses).
+- **Stable `item_id` and `alias_id`**: these are treated as immutable identity keys, never auto-generated on load or serialize. The deserializer reconstructs tuples of `CheckItemAlias` from the list.
+- **Strict validation**: missing `schemaVersion`, wrong type, unsupported version, missing required fields (`item_id`, `code`, `detection_phrase`), wrong types (e.g. non-boolean `enabled`, non-list `aliases`) all raise `ValueError`. No silent coercion.
+
+### Save algorithm (final — corrected 2026-09-22)
+
+```
+1. parent_dir.mkdir(parents=True, exist_ok=True)
+2. mkstemp(dir=parent_dir, prefix=".tmp_new_") → temp-new
+3. json.dump(data, temp-new_fh, ensure_ascii=False, indent=2)
+4. temp-new_fh.flush(); os.fsync(temp-new_fh.fileno()); close
+5. if primary exists:
+     a. mkstemp(dir=parent_dir, prefix=".tmp_bak_") → temp-backup
+     b. copyfileobj(primary → temp-backup)
+     c. flush + fsync temp-backup
+     d. os.replace(temp-backup, primary + ".bak")   ← phase=1
+6. os.replace(temp-new, primary)                    ← phase=2
+```
+
+**Critical fix from the first attempt:** the first attempt did `.bak` rename (step 5d) BEFORE the final primary replace (step 6). A failure at step 6 moved primary away to `.bak` but the final replace failed — leaving primary absent. The corrected algorithm **never moves primary away** before installing the new primary. The old primary is copied (not moved) to a temp-backup, fsynced, then that temp-backup is atomically swapped into `.bak`. Only then is temp-new swapped into primary.
+
+Phase numbering (used by test injection via the `_phase_replace` wrapper):
+- `phase=1`: step 5d — swap temp-backup into `.bak`
+- `phase=2`: step 6 — swap temp-new into primary
+
+Key invariant: **the existing primary is never modified or renamed before step 6 succeeds.** Every failure path up to and including step 5 leaves the existing primary intact and loadable. A step-6 failure also leaves primary untouched (the `.bak` was updated to the old primary in step 5d, but primary itself still holds the old baseline).
+
+### Backup and recovery contract
+
+- `.bak` lives alongside the primary file — **not** in a separate backup directory.
+- `load_json_safe(primary_path)` returns `(data, source)` where source is one of `"primary"`, `"backup"`, or `"both-corrupt"`.
+- **Never silently replaces a corrupt primary.** The caller (Task 5 UI) must decide: show a warning, present backup as an option, or both-load-failed with an explicit error.
+- `.bak` is created only when overwriting an existing primary (no `.bak` on first save).
+
+### Failure semantics (atomicity guarantees)
+
+| Failure phase | Observed outcome |
+|---|---|
+| `mkdir` fails | `OSError` propagated; primary untouched; no temp files created |
+| temp-new `mkstemp` fails | `OSError` propagated; primary untouched |
+| `json.dump` fails (step 3) | `OSError` propagated; primary untouched; temp-new cleaned up |
+| `fsync` temp-new fails (step 4) | `OSError` propagated; primary untouched; temp-new cleaned up |
+| temp-backup `mkstemp` fails (step 5a) | `OSError` propagated; primary untouched; temp-new cleaned up; `.bak` untouched |
+| `copyfileobj` fails (step 5b) | `OSError` propagated; primary untouched; temp-new cleaned up; `.bak` untouched |
+| `fsync` temp-backup fails (step 5c) | `OSError` propagated; primary untouched; temp-new + temp-backup cleaned up; `.bak` untouched |
+| `_phase_replace phase=1` fails (step 5d) | `OSError` propagated; primary untouched; temp-new + temp-backup cleaned up; `.bak` untouched (or held by concurrent writer) |
+| `_phase_replace phase=2` fails (step 6) | `OSError` propagated; **primary untouched** (critical invariant verified by test); `.bak` updated with old primary (step 5d succeeded); temp-new cleaned up |
+
+Every failure path leaves the prior primary loadable. The phase-1 and phase-2 replace failures are exercised independently via the `_phase_replace` wrapper in `tests/test_spike_persistence.py::TestPhaseSpecificFailureInjection` — the first attempt blanket-monkeypatched `os.replace` and hit both phases, masking the critical phase-2 failure semantics.
+
+### Remaining limitations
+
+- macOS development machine only; Windows evidence is CI gates, not S3 deployment.
+- The probe does not exercise concurrent-write scenarios (one-baseline design explicitly excludes this).
+- No disk-full testing beyond injected `OSError`.
+- `.bak` is always overwritten by the next save; there is no history chain (explicitly out of scope for MVP).
+- `QStandardPaths.AppDataLocation` probe confirms the path exists at runtime; no long-running-write test to verify the OS doesn't silently relocate the data directory after a restart under different user context (expected from Qt but not independently asserted by this spike).
+
+**Persistence validation: EXECUTED.** The corrected JSON atomic-save approach (two temp files, copy-not-move backup, phase-numbered replace wrapper) is selected with evidence from 56 passing tests. Task 5 (baseline management and persistence) can proceed on this basis.
 
 ## Fixtures and evidence
 
