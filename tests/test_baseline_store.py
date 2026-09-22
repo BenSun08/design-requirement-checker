@@ -683,9 +683,7 @@ class TestUnsupportedSchemaDoesNotFallBack:
         with pytest.raises(ValueError, match="both primary"):
             load_baseline(primary)
 
-    def test_application_wraps_unsupported_schema_as_distinct_token(
-        self, tmp_path: Path
-    ) -> None:
+    def test_application_wraps_unsupported_schema_as_distinct_token(self, tmp_path: Path) -> None:
         """application.load_baseline_from produces source='unsupported-schema'
         for compatibility failures, distinct from 'load-error'."""
         from design_requirement_checker.application import load_baseline_from
