@@ -219,11 +219,23 @@ def format_blocks_html(document: Document) -> str:
     return "".join(parts)
 
 
+#: Explicit startup baseline conditions. Mirrors the failure/success tokens of
+#: application.BaselineLoadResult.source so the UI never parses error strings.
+_BASELINE_LOAD_STATES = (
+    "normal",
+    "no-baseline",
+    "backup",
+    "load-error",
+    "unsupported-schema",
+)
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
         check_items: Sequence[CheckItem] = (),
         baseline_id: str = "",
+        baseline_load_state: str | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("设计需求核查工具")
@@ -232,6 +244,15 @@ class MainWindow(QMainWindow):
 
         self._check_items: tuple[CheckItem, ...] = tuple(check_items)
         self._baseline_id: str = baseline_id
+        #: Startup baseline condition, passed explicitly by the composition
+        #: root from BaselineLoadResult.source — never inferred from banner
+        #: text or item counts. Valid values: normal / no-baseline / backup /
+        #: load-error / unsupported-schema.
+        if baseline_load_state is None:
+            baseline_load_state = "normal" if check_items else "no-baseline"
+        if baseline_load_state not in _BASELINE_LOAD_STATES:
+            raise ValueError(f"unknown baseline_load_state: {baseline_load_state!r}")
+        self._baseline_load_state: str = baseline_load_state
         self._document: Document | None = None
         self._results: tuple[CheckResult, ...] = ()
         self._state: UiState = UiState.EMPTY
@@ -417,6 +438,35 @@ class MainWindow(QMainWindow):
 
     # --- Baseline startup / recovery UX (Task 5) -------------------------
 
+    def apply_baseline_load(self, source: str, error: str | None = None) -> None:
+        """Record the startup baseline condition and show its banner.
+
+        ``source`` is the application-layer ``BaselineLoadResult.source``
+        token, passed explicitly — the UI never infers the condition from
+        error strings or item counts.
+        """
+        if source not in _BASELINE_LOAD_STATES:
+            raise ValueError(f"unknown baseline load source: {source!r}")
+        self._baseline_load_state = source
+        if source == "backup":
+            self.set_baseline_recovered(
+                "已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限"
+            )
+        elif source == "load-error":
+            self.set_baseline_failure(error or "未知错误")
+        elif source == "unsupported-schema":
+            self._baseline_banner.setStyleSheet(
+                "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+            )
+            self._baseline_banner.setText(
+                "当前基准文件由不兼容的较新版本创建。\n"
+                "本版本不会覆盖该文件。\n"
+                "请使用兼容版本打开，或先人工备份/移走该文件。"
+            )
+            self._baseline_banner.setVisible(True)
+            self.statusBar().showMessage("检查基准不兼容")
+        # normal / no-baseline: no banner, ordinary first-use experience.
+
     def set_baseline_recovered(self, message: str) -> None:
         """Show a persistent warning that the baseline came from backup."""
         self._baseline_banner.setStyleSheet(
@@ -435,6 +485,11 @@ class MainWindow(QMainWindow):
         )
         self._baseline_banner.setVisible(True)
         self.statusBar().showMessage("检查基准加载失败")
+
+    def clear_baseline_banner(self) -> None:
+        """Hide the baseline banner; used after a successful recovery save."""
+        self._baseline_banner.clear()
+        self._baseline_banner.setVisible(False)
 
     # --- result summary & ordering -----------------------------------------
 
@@ -825,12 +880,24 @@ class MainWindow(QMainWindow):
         On Reject (including the Close button): discard changes, leave
         everything untouched. Persistence errors leave the old baseline and
         old results in place — only a successful save mutates state.
+
+        Recovery states change the flow explicitly:
+
+          - ``load-error`` — replacing the damaged primary is destructive,
+            so it requires an explicit confirmation before persisting.
+          - ``backup`` — a successful save installs a new primary and clears
+            the recovery banner (the application no longer runs from backup).
+          - ``unsupported-schema`` — the store refuses to overwrite the
+            newer-schema file; the save surfaces a compatibility failure.
         """
         from design_requirement_checker.application import (
             save_baseline_to,
             validate_baseline,
         )
-        from design_requirement_checker.baseline_store import default_path
+        from design_requirement_checker.baseline_store import (
+            UnsupportedBaselineSchemaError,
+            default_path,
+        )
         from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
 
         dialog = ChecklistDialog(self._check_items, parent=self)
@@ -869,6 +936,21 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已取消保存")
                 return
 
+        # --- Destructive replacement over a damaged primary is explicit ---
+        if self._baseline_load_state == "load-error":
+            from PySide6.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "确认替换损坏的基准",
+                "当前基准无法读取。\n继续保存将创建新的基准并替换损坏的主文件。\n是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply is not QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage("已取消保存")
+                return
+
         # --- Persist first; only after success do we publish ---
         try:
             import uuid
@@ -877,6 +959,17 @@ class MainWindow(QMainWindow):
             # Generate identity exactly once — on the very first save.
             baseline_id = self._baseline_id or uuid.uuid4().hex
             save_baseline_to(baseline_path, new_items, baseline_id)
+        except UnsupportedBaselineSchemaError:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(
+                self,
+                "基准版本不兼容",
+                "现有基准文件由不兼容的较新版本创建，本版本不会覆盖该文件。\n"
+                "请使用兼容版本打开，或先人工备份/移走该文件后再保存。",
+            )
+            self.statusBar().showMessage("基准版本不兼容 — 未保存")
+            return
         except (OSError, ValueError) as exc:
             from PySide6.QtWidgets import QMessageBox
 
@@ -890,6 +983,11 @@ class MainWindow(QMainWindow):
 
         # --- Publish: mutate snapshot + invalidate stale results ---
         self.set_check_items(new_items, baseline_id)
+        # A successful save installs a new primary: recovery/first-launch
+        # conditions end here and the window operates from a normal baseline.
+        if self._baseline_load_state in ("backup", "load-error", "no-baseline"):
+            self._baseline_load_state = "normal"
+            self.clear_baseline_banner()
         self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
 
     def set_check_items(

@@ -30,16 +30,11 @@ def main(argv: list[str] | None = None) -> int:
         items = ()
         baseline_id = ""
 
+    # On success source is "primary" / "backup" / "no-baseline"; on failure
+    # "load-error" / "unsupported-schema". The window records the condition
+    # explicitly and shows the matching banner — no error-string parsing.
     window = MainWindow(check_items=items, baseline_id=baseline_id)
-
-    # --- Recovery / failure UX ---
-    if load_result.ok and load_result.source == "backup":
-        # Recovered from backup — show persistent in-window warning.
-        window.set_baseline_recovered("已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限")
-    elif not load_result.ok:
-        # Neither primary nor backup usable — explicit failure.
-        window.set_baseline_failure(load_result.error or "未知错误")
-    # "no-baseline" / "primary" paths need no extra banner.
+    window.apply_baseline_load(load_result.source, error=load_result.error)
 
     window.show()
     return app.exec()
