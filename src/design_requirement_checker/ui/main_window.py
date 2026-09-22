@@ -871,8 +871,12 @@ class MainWindow(QMainWindow):
 
         # --- Persist first; only after success do we publish ---
         try:
+            import uuid
+
             baseline_path = default_path()
-            save_baseline_to(baseline_path, new_items, self._baseline_id)
+            # Generate identity exactly once — on the very first save.
+            baseline_id = self._baseline_id or uuid.uuid4().hex
+            save_baseline_to(baseline_path, new_items, baseline_id)
         except (OSError, ValueError) as exc:
             from PySide6.QtWidgets import QMessageBox
 
@@ -885,7 +889,7 @@ class MainWindow(QMainWindow):
             return
 
         # --- Publish: mutate snapshot + invalidate stale results ---
-        self.set_check_items(new_items, self._baseline_id)
+        self.set_check_items(new_items, baseline_id)
         self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
 
     def set_check_items(

@@ -234,8 +234,13 @@ def save_baseline(
 
     Raises:
         OSError: on mkdir, write, fsync, or replace failures.
-        ValueError: on validation defects in the serialized data shape.
+        ValueError: on validation defects in the serialized data shape,
+            including an empty ``baseline_id`` — the persistence layer will
+            never write an empty identity even if higher layers regress.
     """
+    if not baseline_id or not baseline_id.strip():
+        raise ValueError("baseline_id must be a non-empty string (not whitespace-only)")
+
     primary_path = Path(primary_path)
     dir_path = primary_path.parent
     dir_path.mkdir(parents=True, exist_ok=True)

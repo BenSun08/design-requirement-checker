@@ -515,3 +515,88 @@ class TestDefaultPath:
         path = default_path()
         assert isinstance(path, Path)
         assert path.name == "baseline.json"
+
+
+# ---------------------------------------------------------------------------
+# R5.2 — First-launch baseline identity must be stable and non-empty
+# ---------------------------------------------------------------------------
+
+
+class TestFirstLaunchBaselineIdentity:
+    """Regression: empty baselineId must never be persisted.
+
+    On first launch (no baseline yet), the UI generates a UUID; the
+    persistence layer also rejects empty baseline_id as a last line of
+    defense. The identity is stable across restart — regenerated exactly
+    once, never on save/edit/enable/delete.
+    """
+
+    def test_save_rejects_empty_baseline_id(self, tmp_path: Path) -> None:
+        primary = tmp_path / "baseline.json"
+        with pytest.raises(ValueError, match="non-empty string"):
+            save_baseline(primary, (_item("a"),), "")
+        assert not primary.exists(), "No invalid primary written"
+
+    def test_save_rejects_whitespace_only_baseline_id(self, tmp_path: Path) -> None:
+        primary = tmp_path / "baseline.json"
+        with pytest.raises(ValueError):
+            save_baseline(primary, (_item("a"),), "   ")
+        assert not primary.exists()
+
+    def test_first_save_generates_uuid_persists_reloadable(self, tmp_path: Path) -> None:
+        """Simulates the MainWindow first-launch flow.
+
+        no baseline → create first item → save with generated UUID →
+        reload → same baseline_id + same item IDs.
+        """
+        primary = tmp_path / "baseline.json"
+        # Confirm no baseline at start
+        assert not primary.exists()
+
+        new_bid = uuid.uuid4().hex
+        items = (_item("first-item"),)
+        save_baseline(primary, items, new_bid)
+
+        # Disk has non-empty baselineId
+        raw = json.loads(primary.read_text(encoding="utf-8"))
+        assert raw["baselineId"] == new_bid
+        assert raw["baselineId"] != ""
+
+        # Reload round-trip preserves both IDs
+        loaded_items, loaded_bid, source = load_baseline(primary)
+        assert source is BaselineLoadSource.PRIMARY
+        assert loaded_bid == new_bid
+        assert loaded_items[0].item_id == "first-item"
+
+        # A subsequent save with the SAME baseline_id preserves it.
+        save_baseline(primary, items, new_bid)
+        raw2 = json.loads(primary.read_text(encoding="utf-8"))
+        assert raw2["baselineId"] == new_bid
+
+    def test_save_with_existing_id_never_regenerates(self, tmp_path: Path) -> None:
+        """Edit/enable/delete flow reuses the same baseline_id, never regenerates."""
+        primary = tmp_path / "baseline.json"
+        stable_bid = "abcdef1234567890abcdef1234567890"
+
+        items_v1 = (_item("item-v1"),)
+        save_baseline(primary, items_v1, stable_bid)
+        raw = json.loads(primary.read_text(encoding="utf-8"))
+        assert raw["baselineId"] == stable_bid
+
+        items_v2 = (_item("item-v1"), _item("item-v2"))
+        save_baseline(primary, items_v2, stable_bid)
+        raw2 = json.loads(primary.read_text(encoding="utf-8"))
+        assert raw2["baselineId"] == stable_bid
+
+    def test_backup_recovery_preserves_existing_baseline_id(self, tmp_path: Path) -> None:
+        """Recovering from .bak must preserve the existing non-empty identity."""
+        primary = tmp_path / "baseline.json"
+        save_baseline(primary, (_item("bak-item"),), "recoverable-bid")
+        save_baseline(primary, (_item("primary-item"),), "current-bid")
+        # Corrupt primary
+        primary.write_bytes(b"corrupt!!!")
+
+        items, bid, source = load_baseline(primary)
+        assert source is BaselineLoadSource.BACKUP
+        assert bid == "recoverable-bid"
+        assert items[0].item_id == "bak-item"
