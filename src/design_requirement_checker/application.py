@@ -273,3 +273,76 @@ def validate_baseline(items: Sequence[CheckItem]) -> BaselineValidationResult:
         errors=tuple(errors),
         warnings=tuple(warnings),
     )
+
+
+# ---------------------------------------------------------------------------
+# Baseline persistence lifecycle (Task 5, T5.3)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BaselineLoadResult:
+    """Outcome of loading a baseline from disk."""
+
+    items: tuple[CheckItem, ...] | None
+    baseline_id: str | None
+    source: str  # stable token from BaselineLoadSource
+    error: str | None  # None when load succeeded
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+
+def load_baseline_from(path: Path) -> BaselineLoadResult:
+    """Load a baseline snapshot from ``path``.
+
+    Wraps :func:`baseline_store.load_baseline` and converts any persistent
+    failure into an explicit error rather than propagating exceptions. On
+    success returns the item tuple (immutable snapshot), baseline_id, and
+    the source token indicating whether it came from primary or backup.
+    """
+    from design_requirement_checker.baseline_store import load_baseline
+
+    try:
+        items, baseline_id, source = load_baseline(Path(path))
+    except (OSError, ValueError) as exc:
+        return BaselineLoadResult(
+            items=None,
+            baseline_id=None,
+            source="load-error",
+            error=str(exc),
+        )
+    return BaselineLoadResult(
+        items=items,
+        baseline_id=baseline_id,
+        source=source.value,
+        error=None,
+    )
+
+
+def save_baseline_to(
+    path: Path,
+    items: Sequence[CheckItem],
+    baseline_id: str,
+) -> BaselineValidationResult:
+    """Validate then persist a baseline snapshot.
+
+    Validation errors raise :class:`ValueError` immediately — persistence
+    is never attempted. Validation warnings do not block. Persistence
+    errors (filesystem failure, atomic replace failure) also raise and
+    leave the primary/backup untouched.
+
+    The UI must decide to publish only after this returns successfully.
+    """
+    from design_requirement_checker.baseline_store import save_baseline
+
+    validation = validate_baseline(items)
+    if validation.errors:
+        raise ValueError(
+            "baseline validation errors block save: "
+            + "; ".join(e.message for e in validation.errors)
+        )
+
+    save_baseline(Path(path), items, baseline_id)
+    return validation

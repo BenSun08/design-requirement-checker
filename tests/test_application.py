@@ -432,3 +432,131 @@ class TestBaselineValidation:
         assert [(w.kind, w.item_ids) for w in r1.warnings] == [
             (w.kind, w.item_ids) for w in r2.warnings
         ]
+
+
+class TestBaselineLifecycle:
+    def _vitem(
+        self,
+        item_id: str,
+        code: str,
+        name: str,
+        phrase: str,
+        *,
+        enabled: bool = True,
+    ) -> CheckItem:
+        from design_requirement_checker.domain import CheckItemAlias
+
+        return CheckItem(
+            item_id=item_id,
+            code=code,
+            name=name,
+            detection_phrase=phrase,
+            aliases=(),
+            enabled=enabled,
+        )
+
+    # --- Load ---
+
+    def test_load_from_missing_file_is_not_a_failure(self, tmp_path) -> None:
+        from design_requirement_checker.application import load_baseline_from
+
+        result = load_baseline_from(tmp_path / "no_such.json")
+        assert result.items == ()  # empty = normal first launch
+        assert result.baseline_id == ""
+        assert result.source == "no-baseline"
+        assert result.error is None
+        assert result.ok
+
+    def test_load_from_corrupt_file_reports_error(self, tmp_path) -> None:
+        from design_requirement_checker.application import load_baseline_from
+
+        bad = tmp_path / "corrupt.json"
+        bad.write_text("not json", encoding="utf-8")
+        result = load_baseline_from(bad)
+        assert not result.ok
+        assert result.items is None
+        assert result.error is not None
+
+    def test_load_from_valid_roundtrip(self, tmp_path) -> None:
+        from design_requirement_checker.application import (
+            load_baseline_from,
+            save_baseline_to,
+        )
+
+        items = (
+            self._vitem("a", "A", "功能A", "检测A"),
+            self._vitem("b", "B", "功能B", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        save_baseline_to(path, items, "bid-1")
+        result = load_baseline_from(path)
+        assert result.ok
+        assert result.items == items
+        assert result.baseline_id == "bid-1"
+        assert result.source == "primary"
+
+    # --- Save ---
+
+    def test_save_returns_validation_with_warnings(self, tmp_path) -> None:
+        from design_requirement_checker.application import save_baseline_to
+
+        items = (
+            self._vitem("a", "A", "同名", "检测A"),
+            self._vitem("b", "B", "同名", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        result = save_baseline_to(path, items, "bid-2")
+        assert result.is_valid
+        assert len(result.warnings) == 1
+        assert result.warnings[0].kind == "duplicate-name"
+        # File actually written
+        assert path.exists()
+
+    def test_save_blocks_on_validation_errors(self, tmp_path) -> None:
+        from design_requirement_checker.application import save_baseline_to
+
+        items = (
+            self._vitem("a", "DUP", "功能A", "检测A"),
+            self._vitem("b", "DUP", "功能B", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        import pytest
+
+        with pytest.raises(ValueError, match="validation errors block save"):
+            save_baseline_to(path, items, "bid-3")
+        # Nothing written
+        assert not path.exists()
+
+    def test_persistence_failure_preserves_no_baseline(self, tmp_path, monkeypatch) -> None:
+        """If the atomic save fails, no baseline file is left behind."""
+        import design_requirement_checker.baseline_store as bs
+        from design_requirement_checker.application import save_baseline_to
+
+        original = bs._phase_replace
+
+        def _failing_replace(src, dst, *, phase):
+            if phase == 2:
+                raise OSError("disk full")
+            return original(src, dst, phase=phase)
+
+        monkeypatch.setattr(bs, "_phase_replace", _failing_replace)
+
+        items = (self._vitem("a", "A", "功能A", "检测A"),)
+        path = tmp_path / "baseline.json"
+        import pytest
+
+        with pytest.raises(OSError, match="disk full"):
+            save_baseline_to(path, items, "bid-4")
+        assert not path.exists()
+
+    def test_save_then_load_preserves_stable_ids(self, tmp_path) -> None:
+        from design_requirement_checker.application import (
+            load_baseline_from,
+            save_baseline_to,
+        )
+
+        items = (self._vitem("keep-me", "A", "功能A", "检测A"),)
+        path = tmp_path / "baseline.json"
+        save_baseline_to(path, items, "bid-5")
+        result = load_baseline_from(path)
+        assert result.items[0].item_id == "keep-me"
