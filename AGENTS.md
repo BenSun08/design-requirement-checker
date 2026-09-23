@@ -1118,31 +1118,42 @@ Do not implement it unless explicitly authorized.
 
 ---
 
-## 25. Current Next Major Task
+## 25. Current Milestone: v0.1 Internal Demo
 
-After the persistence-validation spike is merged and `main` CI is green:
-
-```text
-Task 5 — Baseline management and persistence
-```
-
-Recommended subtasks:
+Tasks 2–5 are implemented on `main`:
 
 ```text
-T5.1 production baseline_store
-T5.2 baseline validation rules
-T5.3 application baseline lifecycle
-T5.4 checklist-management UI shell
-T5.5 add/edit items and aliases
-T5.6 enable/disable/delete and stable IDs
-T5.7 persistence/recovery UX
-T5.8 main-window integration and result invalidation
-T5.9 restart/integration/regression/docs
+Task 2 — real DOCX ingestion
+Task 3 — deterministic verification
+Task 4 — Qt review workspace
+Task 5 — baseline management and persistence
 ```
 
-One focused commit per subtask.
+Task 6 historical measurement and Task 7 formal deployment validation are
+**intentionally deferred by the owner** for this milestone. Task 6 evaluation
+tooling exists under `validation/` but has produced no measured metrics (no
+independently labelled corpus supplied). See `docs/demo-readiness.md`.
 
-Do not start Task 6 inside Task 5.
+Future agent default work for this milestone:
+
+```text
+bug fixes
+small demo usability fixes
+documentation maintenance
+```
+
+Agents must NOT automatically start:
+
+```text
+Task 6 (historical measurement / corpus work)
+Task 7 (formal deployment validation)
+V0.2 features (export, fuzzy/semantic matching, multi-baseline, etc.)
+```
+
+without explicit owner authorization.
+
+All architecture, domain, matching, DOCX, threading, UI, persistence and
+quality rules in sections 1–24 remain unchanged.
 
 ---
 

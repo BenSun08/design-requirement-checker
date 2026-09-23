@@ -4,6 +4,33 @@
 
 Status: updated after owner confirmation. Production: **Python + PySide6 / Qt Widgets**. Deployment: **Windows 10/11 x64, no administrator/installation privileges**. The roadmap remains expressed as user outcomes; detailed tasks are in implementation-plan.md. Approximately eight hours/week is available. No production code or spike is executed by this document update.
 
+## Milestone structure (2026-09-23 owner decision)
+
+The roadmap is now split into two milestones:
+
+### Milestone A — Internal Demo (v0.1)
+
+**Current status: READY FOR CLOSEOUT** — subject to the final quality gates in `docs/demo-readiness.md` passing (they are green on `main` at `96bfe48`).
+
+Scope:
+
+- Tasks 2–5 functional product (DOCX ingestion, deterministic checking, Qt review workspace, baseline management and local persistence)
+- portable Windows artifact build (PyInstaller onedir workflow)
+- manual owner smoke check of the downloaded executable on a company computer
+
+This is a demo milestone, not a release: no formal release-readiness claim is made.
+
+### Milestone B — Pilot / Release Validation (still pending)
+
+- Task 6 real historical metrics (independently labelled corpus, precision/recall, strike accuracy, unresolved/coverage rates, review-time change)
+- Task 7 / S3 formal deployment validation (clean Win10/11, no-admin, offline, Python 3.8 coexistence, endpoint policy)
+- release thresholds agreed with the owner
+- pilot authorization
+
+These requirements are **deferred, not deleted**; they remain prerequisites before claiming production/pilot readiness.
+
+## Detailed milestones
+
 | Milestone | User-visible outcome | Acceptance criteria | Remaining validation / gate |
 |---|---|---|---|
 | 0 Definition, prototype and decisions | Reviewable mock plus agreed product rules and stack | Historical prototype retained; separate detection phrase, three statuses plus unresolved, conflict/partial-strike rules, one baseline and scope documented | Completed decision gate; prototype does not yet demonstrate every newly confirmed rule |
@@ -16,7 +43,7 @@ Status: updated after owner confirmation. Production: **Python + PySide6 / Qt Wi
 
 S3 is deliberately early even though the production pilot is Milestone 6. Users cannot elevate: an administrator-required installer is not an acceptable default. Validate a portable directory first; retain per-user installer as an option only if policy allows it. A policy preventing all user-level execution is an IT dependency to resolve, not a reason to bypass restrictions.
 
-Milestone 2 consumes baseline data; Milestone 4 adds full editing/persistence UX. Expected/actual comparison is MVP; enhanced diff/fuzzy matching, manual confirmation, export and improved preview remain candidates after pilot feedback. AI, editing, Word integration, multiple baselines and team synchronization require separate scope decisions.
+Milestone 2 consumes baseline data; Milestone 4 adds full editing/persistence UX (implemented 2026-09-23 under Milestone A). Expected/actual comparison is MVP; enhanced diff/fuzzy matching, manual confirmation, export and improved preview remain candidates after pilot feedback. AI, editing, Word integration, multiple baselines and team synchronization require separate scope decisions.
 
 Implementation remains gated by explicit execution authorization and relevant validation evidence. Validation failure triggers a bounded reassessment inside the selected stack; replacing the stack requires the owner to decide again. Schedule targets are reviewed after probes, not derived from the mock's completion.
 

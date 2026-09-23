@@ -97,11 +97,11 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 ## 当前状态与全局约束
 
-- 当前生产代码是桌面框架，并保留历史浏览器模拟；macOS／Windows 开发共用一套 Python 源码。两者都不构成 Python 解析器或 Windows 部署证据。
+- **2026-09-23 演示里程碑更新：** 生产任务 2–5（DOCX 摄取、确定性核查、Qt 审查工作区、基准管理与持久化）已在 `main` 实现。本节此前描述的"当前生产代码是桌面框架，并保留历史浏览器模拟"已不再成立；`prototype/` 浏览器模拟仅作为历史保留。macOS／Windows 仍是开发与 CI 平台，不构成部署证据。
 - Windows 10/11 x64，无管理员／安装权限，不要求用户安装 Python/Qt/Office。具体 Windows 构建及运行时兼容属于 S3。
 - 首次分发、解压／安装、首次启动和核查完全离线，原件不变。目标电脑不依赖在线引导安装器、pip install、激活或依赖下载。
 - GitHub Actions 在 macOS 和 Windows 使用 Python 3.13 验证；Windows-only 手动工作流生成 PyInstaller onedir 候选包。CI 构建是 S3 输入，不代表 S3 完成。
-- 后续基准／配置／日志的持久化路径由平台适配器通过 Qt `QStandardPaths` 取得；领域层和应用层保持 OS 无关，不在可执行文件目录写运行数据。
+- 基准持久化路径已通过 Qt `QStandardPaths` 平台适配器实现（任务 5：`AppDataLocation/baseline.json`）；领域层和应用层保持 OS 无关，不在可执行文件目录写运行数据。配置／日志路径仍属后续工作。
 - 一套本地基准；id/code/name/detectionPhrase 必填，expectedDescription 可选，aliases/category/notes/enabled 明确。不自动提词、不建订单模板框架。
 - 三个 CheckStatus 加独立 UNRESOLVED，后者 status 为空。正常／删除线并存、部分／未知格式、身份歧义、有效关键值冲突待人工核查。
 - 保留所有合格出现；单处明确功能参数变化可为 CONFIGURED + DIFFERENT；没有预期／不支持比较为 NOT_COMPARED。
@@ -114,13 +114,13 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 |---|---|
 | A 产品规则 | 用户已确认 1–7，不重复询问相同规则；用夹具验证转换和要求范围细节 |
 | B 技术栈 | 已关闭：选择 Python + PySide6 Qt Widgets；不比较决赛候选、不自动转用其他框架 |
-| C 技术就绪 | 已有跨平台 CI 和初始 PyInstaller onedir 配置；S1/S2/S3/S6 仍待验证，CI 产物不证明干净电脑离线部署 |
+| C 技术就绪 | 已有跨平台 CI 和初始 PyInstaller onedir 配置；S1/S2/S6 与持久化验证实验已执行；S3 仍待验证，CI 产物不证明干净电脑离线部署 |
 | D 执行授权 | 本次不执行实验或生产代码；下个有限工作包需要授权 |
 | E 试点 | 标注夹具／历史验证和无管理员 Windows 部署通过，用户同意发布阈值 |
 
 ## 建议的源文件职责
 
-以下是计划路径，并非已有文件。保持小模块结构，只有实际职责增长时才拆分。
+**2026-09-23 说明：** 以下所有路径现已作为生产代码存在（任务 2–5）；本表最初为计划。保持小模块结构，只有实际职责增长时才拆分。
 
 | 建议路径 | 职责 |
 |---|---|
@@ -131,6 +131,7 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 | `src/design_requirement_checker/baseline_store.py` | 用户可写位置的一套基准加载／保存／恢复 |
 | `src/design_requirement_checker/ui/main_window.py` | Qt Widgets 导入和分栏审查 |
 | `src/design_requirement_checker/ui/checklist_dialog.py` | 基准编辑／校验、detectionPhrase 字段 |
+| `src/design_requirement_checker/ui/item_editor_dialog.py` | 单条目新增／编辑，稳定 item／alias 身份 |
 | `src/design_requirement_checker/__main__.py` | 只负责启动／组装 |
 | `tests/fixtures/`, `tests/test_domain.py`, `tests/test_matching.py`, `tests/test_docx_adapter.py` | 独立期望输出和确定性测试 |
 | `tests/test_application.py`, `tests/test_baseline_store.py`, `tests/test_ui.py` | 失效／取消、保存／恢复及重点 Qt 交互 |
@@ -211,6 +212,22 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 ## 任务 6 — 历史验证与发布就绪
 
+**2026-09-23 演示里程碑决定：** 用户已选择停止当前里程碑的正式验证工作。项目以
+**v0.1 内部演示**收尾（见 [demo-readiness.md](demo-readiness.md)）。任务 6 的真实
+历史测量因独立历史语料不可得而**延期**；任务 7 的正式部署验证因当前目标是可用的
+内部演示而**延期**。两个任务均不视为完成，以下清单保持未勾选。
+
+演示里程碑验收：
+
+- 生产任务 2–5 已实现
+- 仓库 CI 绿色（macOS ＋ Windows，Python 3.13）
+- Windows 便携产物构建可用
+- 用户已在公司电脑上手动冒烟测试下载的可执行程序
+- 明确排除任何正式发布就绪声明
+
+以下任务 6 验证工具记录予以保留；`validation/` 下的历史验证基础设施留在仓库中
+供未来使用，不得删除。
+
 **产物：**脱敏标注语料、实测报告、回归夹具、已知限制。
 
 **2026-09-23 执行记录（部分——证据 BLOCKED）：**任务 6 的评测基础设施已在分支
@@ -284,7 +301,11 @@ schemaVersion 1，独立于生产 `CheckResult` 模型校验）、`validation/ha
 任务 1 剩余实验（S3）仍待
 执行，需各自的授权及 Windows／样本访问；打包格式下的备份／替换验证与
 干净机器／免提权部署证据仍留给任务 7 —— macOS／Windows 的 GitHub Actions
-CI 为源代码级证据，不等于干净机器部署证据。不重新开放技术栈，不自动开始下一个切片。
+CI 为源代码级证据，不等于干净机器部署证据。**2026-09-23 演示里程碑决定
+（用户）：** 正式任务 6 测量与任务 7 部署验证延期；项目以 v0.1 内部演示收尾
+（见 [demo-readiness.md](demo-readiness.md)）。后续代理的默认工作为缺陷修复、
+小的演示可用性改进与文档维护；启动任务 6、任务 7 或 V0.2 功能需用户明确授权。
+不重新开放技术栈，不自动开始下一个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境
 
