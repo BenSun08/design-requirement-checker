@@ -739,9 +739,7 @@ class TestUnsupportedSchemaSaveProtection:
         }
         path.write_text(json.dumps(data), encoding="utf-8")
 
-    def test_save_over_unsupported_schema_raises_and_modifies_nothing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_save_over_unsupported_schema_raises_and_modifies_nothing(self, tmp_path: Path) -> None:
         from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
 
         primary = tmp_path / "baseline.json"
