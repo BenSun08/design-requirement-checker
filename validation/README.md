@@ -116,19 +116,47 @@ constructors are not used as the label validator.
 
 ## Preparing a corpus (workflow when real documents become available)
 
-1. Obtain historical `设计开发要求` DOCX files; sanitize them (remove
-   customer/order/VIN/personal data) or keep them in
-   `validation/corpus-local/` (gitignored).
-2. Assign anonymous IDs `hist-001`, `hist-002`, …
-3. A human reviewer — who has not looked at checker output — fills
-   `labels/<id>.json` per the schema above, including ambiguous and
-   unsupported cases; anything not safely labelable gets
-   `includeInMetrics: false` with a reason.
-4. Freeze the baseline JSON used for the run (record its `baselineId`).
-5. Run `python scripts/run_historical_validation.py validation/manifest.json`.
-6. Review `validation/reports/` and classify every discrepancy
+**Current status: BLOCKED — no real/sanitized historical corpus has been
+supplied to this repository.** All evidence in `tests/` is synthetic and
+proves implementation consistency only; none of it counts as historical
+validation. Until sanitized documents and independent labels are supplied,
+Task 6 metrics remain NOT MEASURED.
+
+To unblock, follow this workflow:
+
+1. Obtain historical `设计开发要求` DOCX files.
+2. **Sanitize** each document (or keep it local-only):
+   - remove/replace customer names, order numbers, vehicle VINs, project
+     codes and personal information;
+   - keep the engineering wording, tables and strike formatting intact —
+     that is what is being validated;
+   - if the document cannot be safely sanitized, place it in
+     `validation/corpus-local/` (gitignored) and set
+     `"sanitizationState": "local-only"`; never commit it.
+3. Assign stable anonymous IDs (`hist-001`, `hist-002`, …) and copy the
+   sanitized files to `validation/corpus-local/` (or an approved location).
+4. Freeze the baseline JSON used for the run (export via 检查项管理 or copy
+   the production `baseline.json`); record its `baselineId` in the manifest
+   notes. Do not edit the baseline while labels are being produced.
+5. A human reviewer — who has not looked at checker output — fills
+   `labels/<id>.json` per the schema above:
+   - label every (document, item) pair that can be judged from the document;
+   - include ambiguous and unsupported cases; anything not safely labelable
+     gets `includeInMetrics: false` with an explicit `exclusionReason`;
+   - record in `labelledBy` who/what produced the labels;
+   - aim to cover CONFIGURED / MISSING / STRUCK_OUT / UNRESOLVED, SAME /
+     DIFFERENT descriptions, partial/unknown/mixed strike, conflicting
+     parameters, alias and NORMALIZED matches, and LIMITED coverage with
+     unsupported OOXML structures — but only as actually present in the
+     historical documents; never force categories.
+6. Create `validation/manifest.json` from `manifest.example.json` listing
+   every document and its labels file.
+7. Run `python scripts/run_historical_validation.py validation/manifest.json`.
+8. Review `validation/reports/` and classify every discrepancy
    (EXTRACTION / MATCHING / NORMALIZATION / CONFIGURATION / POLICY /
    UNSUPPORTED_SCOPE / LABEL_ERROR).
+9. Commit only approved, sanitized label JSON (never raw documents) with a
+   `data(task6):` commit; report actual achieved coverage.
 
 ## Running the evaluator
 

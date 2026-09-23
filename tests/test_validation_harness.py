@@ -206,3 +206,101 @@ def test_harness_output_is_json_serializable(corpus: Path) -> None:
     results = run_validation(corpus)
     text = json.dumps(results, ensure_ascii=False)
     assert "hist-001" in text
+
+
+def test_harness_records_document_sanitization_state(corpus: Path) -> None:
+    results = run_validation(corpus)
+    assert results["documents"][0]["sanitizationState"] == "synthetic"
+
+
+# ---------------------------------------------------------------------------
+# Generic report rendering (T6.4 infrastructure)
+# ---------------------------------------------------------------------------
+
+
+def test_renderer_refuses_purely_synthetic_run(corpus: Path) -> None:
+    from validation.metrics import compute_metrics
+    from validation.report import render_report
+
+    results = run_validation(corpus)
+    with pytest.raises(ValueError, match="not historical evidence"):
+        render_report(results, compute_metrics(results))
+
+
+def test_renderer_rejects_missing_provenance() -> None:
+    """A run with no documents (or no provenance) has no historical evidence."""
+    from validation.metrics import compute_metrics
+    from validation.report import is_historical_run, render_report
+
+    assert not is_historical_run({"cases": [], "documents": []})
+    assert not is_historical_run({"documents": [{"documentId": "x", "coverage": "COMPLETE"}]})
+    with pytest.raises(ValueError, match="not historical evidence"):
+        render_report(
+            {"cases": [], "documents": []},
+            compute_metrics({"cases": [], "documents": []}),
+        )
+
+
+def test_renderer_emits_measured_table_for_sanitized_run() -> None:
+    from validation.metrics import compute_metrics
+    from validation.report import render_report
+
+    results = {
+        "metadata": {
+            "documentCount": 1,
+            "ruleRevision": "task3-v1",
+            "validationSchemaVersion": 1,
+            "gitCommit": "abc123",
+            "timestampUtc": "2026-09-23T00:00:00+00:00",
+        },
+        "baselineId": "baseline-1",
+        "documents": [
+            {
+                "documentId": "hist-001",
+                "coverage": "LIMITED",
+                "coverageWarnings": ["tracked-revisions"],
+                "sanitizationState": "sanitized",
+            }
+        ],
+        "cases": [
+            {
+                "documentId": "hist-001",
+                "itemId": "item-a",
+                "includeInMetrics": True,
+                "exclusionReason": "",
+                "expected": {
+                    "resolution": "RESOLVED",
+                    "status": "CONFIGURED",
+                    "comparison": None,
+                    "strike": None,
+                    "coverage": None,
+                },
+                "observed": {
+                    "resolution": "RESOLVED",
+                    "status": "MISSING",
+                    "comparison": "NOT_COMPARED",
+                    "strike": "NONE",
+                    "coverage": "LIMITED",
+                    "reviewReasons": [],
+                    "comparisonReason": "",
+                },
+                "correct": {
+                    "resolution": True,
+                    "status": False,
+                    "comparison": True,
+                    "strike": True,
+                },
+                "discrepancyCategory": "",
+                "notes": "",
+            }
+        ],
+    }
+    report = render_report(results, compute_metrics(results))
+    assert "hist-001 / item-a" in report
+    assert "RESOLVED/CONFIGURED" in report
+    assert "RESOLVED/MISSING" in report
+    assert "UNCLASSIFIED" in report
+    assert "NOT MEASURED" in report
+    assert "task3-v1" in report
+    # Every metric row shows a denominator.
+    assert "0/1 = 0.0%" in report

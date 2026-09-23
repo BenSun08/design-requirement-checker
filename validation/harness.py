@@ -257,6 +257,7 @@ def run_validation(manifest_path: Path) -> dict[str, Any]:
                 "documentId": entry.document_id,
                 "coverage": observed_coverage,
                 "coverageWarnings": list(doc_result.warnings),
+                "sanitizationState": labels.sanitization_state,
                 "labelledCases": len(labels.labels),
             }
         )

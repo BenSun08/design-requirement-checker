@@ -1,0 +1,3 @@
+# Directory kept in Git so the evaluator can write reports/ here.
+# No measured historical report exists yet: the validation corpus is BLOCKED
+# (no real/sanitized independently labelled documents supplied).
