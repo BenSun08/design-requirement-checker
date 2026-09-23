@@ -218,8 +218,8 @@ def format_blocks_html(document: Document) -> str:
     return "".join(parts)
 
 
-#: Explicit startup baseline conditions. Mirrors the failure/success tokens of
-#: application.BaselineLoadResult.source so the UI never parses error strings.
+#: Explicit UI baseline lifecycle states. These are UI semantics, not
+#: persistence provenance tokens.
 _BASELINE_LOAD_STATES = (
     "normal",
     "no-baseline",
@@ -227,6 +227,20 @@ _BASELINE_LOAD_STATES = (
     "load-error",
     "unsupported-schema",
 )
+
+#: Map application-layer ``BaselineLoadResult.source`` tokens onto UI states.
+#: Persistence provenance ("primary" / "backup" / "no-baseline" from
+#: BaselineLoadSource) plus the application failure tokens ("load-error" /
+#: "unsupported-schema") are translated here, at the composition boundary,
+#: so the UI never parses strings and "primary" — the ordinary successful
+#: case — becomes UI state "normal" instead of being rejected.
+_BASELINE_SOURCE_TO_UI_STATE = {
+    "primary": "normal",
+    "no-baseline": "no-baseline",
+    "backup": "backup",
+    "load-error": "load-error",
+    "unsupported-schema": "unsupported-schema",
+}
 
 
 class MainWindow(QMainWindow):
@@ -243,10 +257,11 @@ class MainWindow(QMainWindow):
 
         self._check_items: tuple[CheckItem, ...] = tuple(check_items)
         self._baseline_id: str = baseline_id
-        #: Startup baseline condition, passed explicitly by the composition
-        #: root from BaselineLoadResult.source — never inferred from banner
+        #: Startup baseline UI lifecycle state — never inferred from banner
         #: text or item counts. Valid values: normal / no-baseline / backup /
-        #: load-error / unsupported-schema.
+        #: load-error / unsupported-schema. Persistence provenance tokens
+        #: (e.g. "primary") are mapped to UI states by apply_baseline_load(),
+        #: not stored here directly.
         if baseline_load_state is None:
             baseline_load_state = "normal" if check_items else "no-baseline"
         if baseline_load_state not in _BASELINE_LOAD_STATES:
@@ -438,22 +453,29 @@ class MainWindow(QMainWindow):
     # --- Baseline startup / recovery UX (Task 5) -------------------------
 
     def apply_baseline_load(self, source: str, error: str | None = None) -> None:
-        """Record the startup baseline condition and show its banner.
+        """Translate the startup load source into a UI state and show its banner.
 
         ``source`` is the application-layer ``BaselineLoadResult.source``
-        token, passed explicitly — the UI never infers the condition from
-        error strings or item counts.
+        token — persistence provenance (``primary`` / ``backup`` /
+        ``no-baseline``) or an application failure token (``load-error`` /
+        ``unsupported-schema``) — passed explicitly; the UI never infers the
+        condition from error strings or item counts. The token is mapped to
+        a UI lifecycle state via ``_BASELINE_SOURCE_TO_UI_STATE``: a
+        successful ``primary`` load is the ordinary case and becomes UI
+        state ``normal`` with no banner. Unknown tokens still raise
+        ``ValueError``.
         """
-        if source not in _BASELINE_LOAD_STATES:
+        if source not in _BASELINE_SOURCE_TO_UI_STATE:
             raise ValueError(f"unknown baseline load source: {source!r}")
-        self._baseline_load_state = source
-        if source == "backup":
+        state = _BASELINE_SOURCE_TO_UI_STATE[source]
+        self._baseline_load_state = state
+        if state == "backup":
             self.set_baseline_recovered(
                 "已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限"
             )
-        elif source == "load-error":
+        elif state == "load-error":
             self.set_baseline_failure(error or "未知错误")
-        elif source == "unsupported-schema":
+        elif state == "unsupported-schema":
             self._baseline_banner.setStyleSheet(
                 "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
             )
@@ -464,7 +486,7 @@ class MainWindow(QMainWindow):
             )
             self._baseline_banner.setVisible(True)
             self.statusBar().showMessage("检查基准不兼容")
-        # normal / no-baseline: no banner, ordinary first-use experience.
+        # normal (from "primary") / no-baseline: no banner, ordinary experience.
 
     def set_baseline_recovered(self, message: str) -> None:
         """Show a persistent warning that the baseline came from backup."""
