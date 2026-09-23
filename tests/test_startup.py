@@ -216,15 +216,17 @@ def poll_completed():
         assert len(window._results) == 1
         assert window._results[0].status.name == "CONFIGURED"
         stage["name"] = "completed"
-        # Close first, then quit — the same order the proven startup test
-        # uses, so teardown matches the existing Windows-clean pattern.
+        # Do not tear down while a worker QThread is still alive: closing or
+        # quitting mid-teardown races the thread's deleteLater cleanup and
+        # fast-fails the process on Windows (0xC0000409).
+        if window._active_threads:
+            QTimer.singleShot(50, poll_completed)
+            return
         window.close()
+        app.quit()
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        window = find_window()
-        if window is not None:
-            window.close()
-    app.quit()
+        app.quit()
 
 QTimer.singleShot(150, step_import)
 rc = entry.main([])
