@@ -216,11 +216,15 @@ def poll_completed():
         assert len(window._results) == 1
         assert window._results[0].status.name == "CONFIGURED"
         stage["name"] = "completed"
+        # Close first, then quit — the same order the proven startup test
+        # uses, so teardown matches the existing Windows-clean pattern.
         window.close()
-        app.quit()
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        app.quit()
+        window = find_window()
+        if window is not None:
+            window.close()
+    app.quit()
 
 QTimer.singleShot(150, step_import)
 rc = entry.main([])
