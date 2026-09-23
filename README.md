@@ -9,8 +9,15 @@ validated S6 rule contract. The Qt review workspace (Task 4) is implemented:
 background import/verification, cancellation, stale-outcome suppression,
 summary counts, ordering, filters, search, result detail, multi-evidence
 navigation, source context, LIMITED coverage notice and keyboard navigation.
-Baseline management and persistence (Task 5) is implemented. Windows
-distribution (Task 7) remains pending.
+Baseline management and persistence (Task 5) is implemented. Task 6 historical
+validation tooling (ground-truth manifest schema, deterministic evaluation
+harness, metrics and report rendering under `validation/` plus
+`scripts/run_historical_validation.py`) is implemented and self-tested with
+synthetic fixtures only; **historical validation itself is BLOCKED** — no
+independently labelled real/sanitized corpus has been supplied, so no measured
+precision/recall/strike/comparison metrics exist. Release thresholds remain a
+proposal pending owner approval (`validation/release-readiness-proposal.md`).
+Windows distribution (Task 7) remains pending.
 
 ## Development platforms
 
@@ -137,6 +144,10 @@ remains a separate historical mock.
 - `tests/s6_probe.py`, `tests/test_spike_s6_rules.py`, `tests/test_spike_s6_scale.py`:
   S6 spike evidence for the deterministic rules Task 3 implements. Not production code.
 - `tests/fixtures/`: conventions for future synthetic fixtures and independent labels.
+- `validation/`: Task 6 evaluation tooling (ground-truth manifest schema,
+  harness, metrics, report renderer, corpus workflow docs); not production code.
+- `scripts/run_historical_validation.py`: Task 6 evaluation CLI running the
+  production import/verify path against an independent label manifest.
 - `pyproject.toml`: package metadata and pinned direct development dependencies.
 
 ## CI validation

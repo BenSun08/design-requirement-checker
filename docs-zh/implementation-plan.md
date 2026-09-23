@@ -213,6 +213,24 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 **产物：**脱敏标注语料、实测报告、回归夹具、已知限制。
 
+**2026-09-23 执行记录（部分——证据 BLOCKED）：**任务 6 的评测基础设施已在分支
+`task6-historical-validation` 实现：`validation/schema.py`（带版本号的真值契约，
+schemaVersion 1，独立于生产 `CheckResult` 模型校验）、`validation/harness.py` 与
+`scripts/run_historical_validation.py`（确定性评测器，走生产路径
+`import_document` → `verify_document`，将预测与独立标注比较；绝不复制匹配逻辑）、
+`validation/metrics.py`（存在性精确率／召回率，UNRESOLVED 不进入 2×2 表而单独统计，
+状态／删除线／比较准确率，待核查率，LIMITED 覆盖与不支持警告率——每项指标都带
+显式分子／分母，零分母显示 `N/A`），以及 `validation/report.py`（实测报告渲染，
+对纯合成运行 fail-closed）。真值分离规则与语料准备工作流记录在
+`validation/README.md`；真实／脱敏语料通过 `.gitignore`（`validation/corpus-local/`）
+保留在本地。`validation/release-readiness-proposal.md` 将阈值与试点范围记录为
+**提案，含 PENDING OWNER APPROVAL 字段——均未获批准**。
+
+**BLOCKED：**本仓库未获得任何真实／脱敏、独立标注的历史语料，因此未执行任何测量。
+所有指标 NOT MEASURED（分母 0），未分类任何差异，未做历史回归修复。合成评测器自测
+（本地 552 项测试通过）仅证明工具与实现一致性——它们明确**不是**历史验证证据。
+因此任务 6 仍不完整并阻塞于证据；在语料提供并执行 T6.4–T6.8 之前，以下清单保持未勾选。
+
 - [ ] 独立于检测输出标注，包含歧义和不支持用例。
 - [ ] 测精确率／召回率、误报／漏报、删除线准确率、待核查率、范围／不支持率、审查时间及分母。
 - [ ] 把差异归类为提取、匹配、规范化、配置、规则或范围问题。
@@ -258,11 +276,15 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 存储（双临时文件原子保存、备份恢复、严格校验、加载与保存两条路径上的
 不兼容 schema 防护）、清单管理与编辑工作区（稳定 item／alias 身份）、显式
 启动恢复状态（no-baseline／backup／load-error／unsupported-schema）、保存
-失败时保留候选编辑、结果失效与过期核查抑制。任务 1 剩余实验（S3）仍待
+失败时保留候选编辑、结果失效与过期核查抑制。任务 6（历史验证）已于 2026-09-23
+经用户授权在分支 `task6-historical-validation` 执行：验证契约、确定性评测器、
+精确指标与报告渲染均已实现并通过自测，但任务处于 **BLOCKED** 状态——未获得
+真实／脱敏、独立标注的历史语料，因此不存在任何测量（所有指标 NOT MEASURED，
+分母 0），也未约定任何发布阈值。任务 6 的下一步需要的是语料证据，而非代码。
+任务 1 剩余实验（S3）仍待
 执行，需各自的授权及 Windows／样本访问；打包格式下的备份／替换验证与
 干净机器／免提权部署证据仍留给任务 7 —— macOS／Windows 的 GitHub Actions
-CI 为源代码级证据，不等于干净机器部署证据。建议的下个工作包为任务 6
-（历史验证），等待明确执行授权。不重新开放技术栈，不自动开始下一个切片。
+CI 为源代码级证据，不等于干净机器部署证据。不重新开放技术栈，不自动开始下一个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境
 

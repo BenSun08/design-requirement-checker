@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "baselineFile": "corpus-local/baseline.json",
+  "notes": "EXAMPLE ONLY — copy to validation/manifest.json when a real/sanitized historical corpus is available. Never commit confidential documents; keep them under validation/corpus-local/ (gitignored). Labels must be produced by a human reading the source document, never copied from checker output.",
+  "documents": [
+    {
+      "documentId": "hist-001",
+      "documentFile": "corpus-local/hist-001.docx",
+      "labelsFile": "labels/example.json",
+      "notes": "anonymous ID; no customer name, order number or VIN anywhere in committed data"
+    }
+  ]
+}
