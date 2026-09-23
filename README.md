@@ -9,7 +9,8 @@ validated S6 rule contract. The Qt review workspace (Task 4) is implemented:
 background import/verification, cancellation, stale-outcome suppression,
 summary counts, ordering, filters, search, result detail, multi-evidence
 navigation, source context, LIMITED coverage notice and keyboard navigation.
-Persistence (Task 5) and Windows distribution remain pending.
+Baseline management and persistence (Task 5) is implemented. Windows
+distribution (Task 7) remains pending.
 
 ## Development platforms
 
@@ -83,7 +84,7 @@ Open the repository in VS Code or Cursor, select the interpreter from the local
 no developer-specific or operating-system-specific interpreter path.
 
 The window provides a title bar with 导入 DOCX / 开始核查 / 取消核查 /
-检查项管理 (management stays disabled until Task 5), a summary and search
+检查项管理, a summary and search
 strip, a QSplitter with the result list and detail pane, and a persistent
 status/footer. Import and verification run off the UI thread with
 indeterminate progress. Completed runs show summary counts and priority
@@ -91,8 +92,12 @@ ordering; filters (全部/已配置/未配置/已划除/待人工核查/仅异�
 (code/name/category/expected/description) operate on cached results. The
 detail pane shows status, comparison state, expected/actual, match method,
 reasons, all evidence occurrences and reconstructed source context.
-CheckItems are injected at construction; with none loaded the window shows
-"尚未加载检查项" and Run stays disabled. It stores no baseline. `prototype/`
+At startup the baseline is loaded from `QStandardPaths.AppDataLocation /
+baseline.json`; 检查项管理 opens a checklist workspace for adding, editing,
+enabling/disabling and confirmed-deleting items with stable identities, and
+saving one local baseline (atomic two-temp-file save with `.bak` backup
+recovery). Missing, backup-recovered, corrupt and unsupported-schema
+baselines are shown as explicit, distinct startup conditions. `prototype/`
 remains a separate historical mock.
 
 ## Source layout
@@ -217,5 +222,11 @@ workspace (background import/verification, cancellation, stale-outcome
 suppression, summary counts, ordering, filters, search, result detail,
 multi-evidence, source context, LIMITED notice and keyboard navigation), all
 on the UI thread with workers off-thread, matching.py and domain.py remaining
-Qt-free. Persistence (Task 5) and real Windows no-admin/offline deployment
-evidence are still pending. See the implementation plan for subsequent slices.
+Qt-free. Baseline management and persistence (Task 5) is implemented: a JSON
+baseline at `QStandardPaths.AppDataLocation/baseline.json` with two-temp-file
+atomic saves, `.bak` backup recovery, strict schema validation, stable
+baseline/item/alias identities, unsupported-schema write protection and an
+explicit checklist-management workspace. Real Windows no-admin/offline
+deployment evidence (Task 7) is still pending — green GitHub Actions Windows
+CI is source-level CI evidence, not clean-machine deployment evidence. See
+the implementation plan for subsequent slices.

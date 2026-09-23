@@ -199,12 +199,12 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 
 **前置证据：** 持久化验证实验已于（初次 2026-09-20，原子保存契约修正 2026-09-22）执行——见 `docs-zh/technical-spikes.md`。**选定格式：JSON 文件**（UTF-8、双临时文件原子保存：temp-new+fsync → copy primary→temp-backup+fsync → os.replace(temp-backup→.bak) → os.replace(temp-new→primary)——新 primary 安装前永不移动旧 primary；`.bak` 与 primary 同目录、`QStandardPaths.AppDataLocation/baseline.json`、严格 schema 校验、`schemaVersion = 1`、稳定 `item_id`／`alias_id`、加载时显式 `(data, source)` 返回元组）。56 项实验测试在 macOS 通过；同一套测试在 Windows CI 上作为门禁。
 
-**文件：**baseline_store.py、ui/checklist_dialog.py、application.py；tests/test_baseline_store.py、tests/test_ui.py。
+**文件：**baseline_store.py、application.py、__main__.py、ui/checklist_dialog.py、ui/item_editor_dialog.py、ui/main_window.py；tests/test_baseline_store.py、tests/test_checklist_ui.py、tests/test_ui.py、tests/test_startup.py。
 
-- [ ] 在 `src/baseline_store.py` 实现 JSON 加载／保存／重启，遵循 `docs/technical-spikes.md` 中已验证的契约（保存算法、恢复策略、严格校验、失败语义）。
-- [ ] 新增／编辑 code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled；拒绝重复 code，提示重复名称／重叠短语。
-- [ ] 提供禁用和确认删除，ID 稳定，允许空 expectedDescription。
-- [ ] 保存一套基准，使结果失效，重启重新加载；无订单／客户模板或同步。
+- [x] 在 `src/baseline_store.py` 实现 JSON 加载／保存／重启，遵循 `docs-zh/technical-spikes.md` 中已验证的契约（保存算法、恢复策略、严格校验、失败语义）。双临时文件原子保存（新 primary 安装成功前永不移动旧 primary）、`.bak` 备份恢复（`source="backup"`）、严格 `schemaVersion = 1` 校验、`UnsupportedBaselineSchemaError` 在加载（不静默回退）与保存（拒绝覆盖更新版本的基准文件）两条路径上都区分兼容性失败与损坏数据，并拒绝空 `baseline_id`。保存→重启→加载往返保持相同 `baselineId`／`item_id`／`alias_id`。
+- [x] 新增／编辑 code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled；拒绝重复 code，提示重复名称／重叠短语。ItemEditorDialog 强制必填字段、允许空 `expectedDescription`、编辑时保持稳定 `item_id`，并按出现次数保留别名 `alias_id`／`notes`（重复别名文本各自保留身份）。`validate_baseline` 将重复 code 作为错误拒绝，重复名称／重叠检测短语作为警告且须显式确认后才继续保存。
+- [x] 提供禁用和确认删除，ID 稳定，允许空 expectedDescription。禁用／重新启用与删除（显式确认）只改动对话框工作副本；启用状态在编辑／保存／重启后保持。
+- [x] 保存一套基准，使结果失效，重启重新加载；无订单／客户模板或同步。启动时从 `BaselineLoadResult.source` 显式记录基准状态（`normal`／`no-baseline`／`backup`／`load-error`／`unsupported-schema`）——绝不从错误字符串推断；保存失败保持对话框打开且候选内容完整，当前基准与结果不变；基准变更会提升操作代号，过期核查结果被丢弃。
 - [ ] 结合分发格式检查免提权备份／替换。
 
 **验收：**不用改源码即可维护基准；当前启用项决定核查；失败不默默丢编辑或损坏保存数据。
@@ -253,9 +253,16 @@ onedir 便携目录，不支持从 macOS 交叉编译 Windows 程序。
 （Qt 审查工作区）已于 2026-09-21 经用户授权以 13 个可审查子任务执行：完整审查
 工作区（后台导入/核查、取消、过期结果抑制、汇总计数、排序、筛选、搜索、结果
 详情、多证据、源上下文、LIMITED 提示、键盘导航）已实现，317 项测试通过且本地
-全部质量门禁为绿。建议的下个工作包为任务 5（基准管理与持久化），等待明确执行
-授权。任务 1 剩余实验（S3、持久化
-验证）仍待执行，需各自的授权及 Windows／样本访问。不重新开放技术栈，不自动开始下一个切片。
+全部质量门禁为绿。任务 5（基准管理与持久化）已于 2026-09-23 经用户授权在
+分支 `task5-baseline-management` 上以可审查子任务加一轮修复实现：JSON 基准
+存储（双临时文件原子保存、备份恢复、严格校验、加载与保存两条路径上的
+不兼容 schema 防护）、清单管理与编辑工作区（稳定 item／alias 身份）、显式
+启动恢复状态（no-baseline／backup／load-error／unsupported-schema）、保存
+失败时保留候选编辑、结果失效与过期核查抑制。任务 1 剩余实验（S3）仍待
+执行，需各自的授权及 Windows／样本访问；打包格式下的备份／替换验证与
+干净机器／免提权部署证据仍留给任务 7 —— macOS／Windows 的 GitHub Actions
+CI 为源代码级证据，不等于干净机器部署证据。建议的下个工作包为任务 6
+（历史验证），等待明确执行授权。不重新开放技术栈，不自动开始下一个切片。
 
 ## 已确认的 Python 3.8 与完全离线环境
 
