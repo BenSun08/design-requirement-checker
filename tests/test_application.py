@@ -285,3 +285,276 @@ class TestVerifyDocument:
                 state=VerificationState.CANCELLED,
                 results=completed.results,
             )
+
+
+# ---------------------------------------------------------------------------
+# Task 5, T5.2 — Baseline cross-item validation
+# ---------------------------------------------------------------------------
+
+
+def _vitem(
+    item_id: str,
+    code: str,
+    name: str,
+    phrase: str,
+    *,
+    aliases: tuple = (),
+    enabled: bool = True,
+) -> CheckItem:
+    from design_requirement_checker.domain import CheckItemAlias
+
+    return CheckItem(
+        item_id=item_id,
+        code=code,
+        name=name,
+        detection_phrase=phrase,
+        aliases=tuple(
+            CheckItemAlias(alias_id=f"{item_id}-a{i}", text=t, notes="")
+            for i, t in enumerate(aliases)
+        ),
+        enabled=enabled,
+    )
+
+
+class TestBaselineValidation:
+    def test_unique_baseline_no_issues(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "检测A"),
+            _vitem("b", "B", "功能B", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert result.is_valid
+        assert result.errors == ()
+        assert result.warnings == ()
+
+    def test_duplicate_code_error(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "DUP", "功能A", "检测A"),
+            _vitem("b", "DUP", "功能B", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert not result.is_valid
+        assert len(result.errors) == 1
+        assert result.errors[0].kind == "duplicate-code"
+        assert set(result.errors[0].item_ids) == {"a", "b"}
+
+    def test_duplicate_name_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "同名", "检测A"),
+            _vitem("b", "B", "同名", "检测B"),
+        )
+        result = validate_baseline(items)
+        assert result.is_valid  # warnings don't block
+        names = [w.kind for w in result.warnings]
+        assert "duplicate-name" in names
+
+    def test_same_phrase_across_items_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "相同检测短语"),
+            _vitem("b", "B", "功能B", "相同检测短语"),
+        )
+        result = validate_baseline(items)
+        collision_kinds = [w.kind for w in result.warnings]
+        assert "phrase-collision" in collision_kinds
+
+    def test_alias_collides_with_other_detection_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "检测短语X"),
+            _vitem("b", "B", "功能B", "检测短语B", aliases=("检测短语X",)),
+        )
+        result = validate_baseline(items)
+        collision_kinds = [w.kind for w in result.warnings]
+        assert "phrase-collision" in collision_kinds
+
+    def test_substring_overlap_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "门控制延时"),
+            _vitem("b", "B", "功能B", "2门控制增加门控制延时功能"),
+        )
+        result = validate_baseline(items)
+        overlap_kinds = [w.kind for w in result.warnings]
+        # Either phrase-collision (after normalize they overlap) or phrase-overlap.
+        assert "phrase-overlap" in overlap_kinds or "phrase-collision" in overlap_kinds
+
+    def test_normal_non_overlapping_phrases_no_warning(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "A", "功能A", "2门控制延时"),
+            _vitem("b", "B", "功能B", "门锁状态反馈"),
+        )
+        result = validate_baseline(items)
+        phrase_warnings = [
+            w for w in result.warnings if w.kind in ("phrase-collision", "phrase-overlap")
+        ]
+        assert phrase_warnings == []
+
+    def test_disabled_item_still_validated(self) -> None:
+        """Disabled items are still part of the persisted baseline and must
+        be validated for duplicate code / names / phrases."""
+        from design_requirement_checker.application import validate_baseline
+
+        items = (
+            _vitem("a", "DUP", "功能A", "检测A", enabled=False),
+            _vitem("b", "DUP", "功能B", "检测B", enabled=True),
+        )
+        result = validate_baseline(items)
+        assert not result.is_valid
+        assert len(result.errors) == 1
+        assert result.errors[0].kind == "duplicate-code"
+
+    def test_deterministic_stable_ordering(self) -> None:
+        from design_requirement_checker.application import validate_baseline
+
+        items_a = (
+            _vitem("x", "SAME", "Z", "Z"),
+            _vitem("y", "SAME", "Y", "Y"),
+        )
+        items_b = tuple(reversed(items_a))
+        r1 = validate_baseline(items_a)
+        r2 = validate_baseline(items_b)
+        # Same errors/warnings regardless of input order.
+        assert [(e.kind, e.item_ids) for e in r1.errors] == [
+            (e.kind, e.item_ids) for e in r2.errors
+        ]
+        assert [(w.kind, w.item_ids) for w in r1.warnings] == [
+            (w.kind, w.item_ids) for w in r2.warnings
+        ]
+
+
+class TestBaselineLifecycle:
+    def _vitem(
+        self,
+        item_id: str,
+        code: str,
+        name: str,
+        phrase: str,
+        *,
+        enabled: bool = True,
+    ) -> CheckItem:
+        return CheckItem(
+            item_id=item_id,
+            code=code,
+            name=name,
+            detection_phrase=phrase,
+            aliases=(),
+            enabled=enabled,
+        )
+
+    # --- Load ---
+
+    def test_load_from_missing_file_is_not_a_failure(self, tmp_path) -> None:
+        from design_requirement_checker.application import load_baseline_from
+
+        result = load_baseline_from(tmp_path / "no_such.json")
+        assert result.items == ()  # empty = normal first launch
+        assert result.baseline_id == ""
+        assert result.source == "no-baseline"
+        assert result.error is None
+        assert result.ok
+
+    def test_load_from_corrupt_file_reports_error(self, tmp_path) -> None:
+        from design_requirement_checker.application import load_baseline_from
+
+        bad = tmp_path / "corrupt.json"
+        bad.write_text("not json", encoding="utf-8")
+        result = load_baseline_from(bad)
+        assert not result.ok
+        assert result.items is None
+        assert result.error is not None
+
+    def test_load_from_valid_roundtrip(self, tmp_path) -> None:
+        from design_requirement_checker.application import (
+            load_baseline_from,
+            save_baseline_to,
+        )
+
+        items = (
+            self._vitem("a", "A", "功能A", "检测A"),
+            self._vitem("b", "B", "功能B", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        save_baseline_to(path, items, "bid-1")
+        result = load_baseline_from(path)
+        assert result.ok
+        assert result.items == items
+        assert result.baseline_id == "bid-1"
+        assert result.source == "primary"
+
+    # --- Save ---
+
+    def test_save_returns_validation_with_warnings(self, tmp_path) -> None:
+        from design_requirement_checker.application import save_baseline_to
+
+        items = (
+            self._vitem("a", "A", "同名", "检测A"),
+            self._vitem("b", "B", "同名", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        result = save_baseline_to(path, items, "bid-2")
+        assert result.is_valid
+        assert len(result.warnings) == 1
+        assert result.warnings[0].kind == "duplicate-name"
+        # File actually written
+        assert path.exists()
+
+    def test_save_blocks_on_validation_errors(self, tmp_path) -> None:
+        from design_requirement_checker.application import save_baseline_to
+
+        items = (
+            self._vitem("a", "DUP", "功能A", "检测A"),
+            self._vitem("b", "DUP", "功能B", "检测B"),
+        )
+        path = tmp_path / "baseline.json"
+        import pytest
+
+        with pytest.raises(ValueError, match="validation errors block save"):
+            save_baseline_to(path, items, "bid-3")
+        # Nothing written
+        assert not path.exists()
+
+    def test_persistence_failure_preserves_no_baseline(self, tmp_path, monkeypatch) -> None:
+        """If the atomic save fails, no baseline file is left behind."""
+        import design_requirement_checker.baseline_store as bs
+        from design_requirement_checker.application import save_baseline_to
+
+        original = bs._phase_replace
+
+        def _failing_replace(src, dst, *, phase):
+            if phase == 2:
+                raise OSError("disk full")
+            return original(src, dst, phase=phase)
+
+        monkeypatch.setattr(bs, "_phase_replace", _failing_replace)
+
+        items = (self._vitem("a", "A", "功能A", "检测A"),)
+        path = tmp_path / "baseline.json"
+        import pytest
+
+        with pytest.raises(OSError, match="disk full"):
+            save_baseline_to(path, items, "bid-4")
+        assert not path.exists()
+
+    def test_save_then_load_preserves_stable_ids(self, tmp_path) -> None:
+        from design_requirement_checker.application import (
+            load_baseline_from,
+            save_baseline_to,
+        )
+
+        items = (self._vitem("keep-me", "A", "功能A", "检测A"),)
+        path = tmp_path / "baseline.json"
+        save_baseline_to(path, items, "bid-5")
+        result = load_baseline_from(path)
+        assert result.items[0].item_id == "keep-me"

@@ -218,12 +218,12 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Prerequisite evidence:** Persistence validation spike EXECUTED (initial 2026-09-20, corrected atomic-save contract 2026-09-22) — see `docs/technical-spikes.md`. **Selected format: JSON file** (UTF-8, two-temp-file atomic save: temp-new+fsync → copy primary→temp-backup+fsync → os.replace(temp-backup→.bak) → os.replace(temp-new→primary) — primary is never moved away before new primary is installed; `.bak` lives alongside primary, `QStandardPaths.AppDataLocation/baseline.json`, strict schema validation, `schemaVersion = 1`, stable `item_id`/`alias_id`, explicit `(data, source)` return tuple on load). 56 spike tests pass on macOS; same tests gate on Windows CI.
 
-**Files:** baseline_store.py, ui/checklist_dialog.py, application.py; tests/test_baseline_store.py and tests/test_ui.py.
+**Files:** baseline_store.py, application.py, __main__.py, ui/checklist_dialog.py, ui/item_editor_dialog.py, ui/main_window.py; tests/test_baseline_store.py, tests/test_checklist_ui.py, tests/test_ui.py, tests/test_startup.py.
 
-- [ ] Implement JSON load/save/restart in `src/baseline_store.py` following the validated contract in `docs/technical-spikes.md` (save algorithm, recovery policy, strict validation, failure semantics).
-- [ ] Add/edit code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled; reject duplicate codes, flag duplicate names/overlapping phrases.
-- [ ] Provide disable and confirmed delete; preserve stable IDs. Empty expectedDescription remains permitted.
-- [ ] Save one baseline; invalidate results; reload after restart. No customer/order template selector or synchronization.
+- [x] Implement JSON load/save/restart in `src/baseline_store.py` following the validated contract in `docs/technical-spikes.md` (save algorithm, recovery policy, strict validation, failure semantics). Two-temp-file atomic save (primary never moved before the new primary is installed), `.bak` backup recovery with `source="backup"`, strict `schemaVersion = 1` validation, `UnsupportedBaselineSchemaError` distinguishing compatibility failure from corruption on BOTH load (no silent fallback) and save (refuses to overwrite a newer-schema primary), and rejection of empty `baseline_id`. Save→restart→load roundtrip keeps the same `baselineId`/`item_id`/`alias_id` values.
+- [x] Add/edit code/name/detectionPhrase/category/expectedDescription/aliases/notes/enabled; reject duplicate codes, flag duplicate names/overlapping phrases. ItemEditorDialog enforces required fields, allows empty `expectedDescription`, preserves stable `item_id` on edit and preserves alias `alias_id`/`notes` per occurrence (duplicate alias texts keep distinct identities). `validate_baseline` rejects duplicate codes as errors and flags duplicate names / overlapping detection phrases as warnings requiring explicit continuation.
+- [x] Provide disable and confirmed delete; preserve stable IDs. Empty expectedDescription remains permitted. Disable/re-enable and delete (with explicit confirmation) mutate only the dialog working copy; enablement survives edit/save/restart.
+- [x] Save one baseline; invalidate results; reload after restart. No customer/order template selector or synchronization. Startup records the baseline condition explicitly (`normal` / `no-baseline` / `backup` / `load-error` / `unsupported-schema`) from `BaselineLoadResult.source` — never parsed from error strings; failed saves keep the dialog open with the candidate intact and never mutate the current baseline or results; baseline changes bump the operation generation so stale verification outcomes are ignored.
 - [ ] Verify backup/replacement behavior with the distribution format and no elevation.
 
 **Acceptance:** engineers can maintain the baseline without editing source; current-order enabled items determine the run; failures never silently discard edits or corrupt the saved baseline.
@@ -271,9 +271,22 @@ authorization as 13 reviewable subtasks: the full review workspace
 (background import/verification, cancellation, stale-outcome suppression,
 summary counts, ordering, filters, search, result detail, multi-evidence,
 source context, LIMITED notice, keyboard navigation) is implemented with 317
-passing tests and all local quality gates green. The next proposed work
-package is Task 5 (baseline management and persistence), pending explicit
-execution authorization. The remaining Task 1 probes (S3, persistence validation) stay pending and require their own authorization and Windows/sample access. No step here re-opens the selected stack or starts the next slice automatically.
+passing tests and all local quality gates green. Task 5 (baseline management
+and persistence) is implemented 2026-09-23 under owner authorization on
+branch `task5-baseline-management` as reviewable subtasks plus a remediation
+pass: the JSON baseline store (atomic two-temp-file save, backup recovery,
+strict validation, unsupported-schema protection on load AND save), the
+checklist management/editing workspace with stable item/alias identities,
+explicit startup recovery states (no-baseline / backup / load-error /
+unsupported-schema), failed-save candidate preservation, and result
+invalidation with stale-verification suppression. The remaining Task 1
+probes (S3) stay pending and require their own authorization and
+Windows/sample access; packaged backup/replacement verification and
+clean-machine/no-admin deployment evidence stay pending for Task 7 — green
+GitHub Actions CI on macOS/Windows is source-level evidence only, not
+clean-machine deployment evidence. The next proposed work package is Task 6
+(historical validation), pending explicit execution authorization. No step
+here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 

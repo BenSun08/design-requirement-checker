@@ -218,14 +218,40 @@ def format_blocks_html(document: Document) -> str:
     return "".join(parts)
 
 
+#: Explicit startup baseline conditions. Mirrors the failure/success tokens of
+#: application.BaselineLoadResult.source so the UI never parses error strings.
+_BASELINE_LOAD_STATES = (
+    "normal",
+    "no-baseline",
+    "backup",
+    "load-error",
+    "unsupported-schema",
+)
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, check_items: Sequence[CheckItem] = ()) -> None:
+    def __init__(
+        self,
+        check_items: Sequence[CheckItem] = (),
+        baseline_id: str = "",
+        baseline_load_state: str | None = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("设计需求核查工具")
         self.resize(1440, 900)
         self.setMinimumSize(1024, 600)
 
         self._check_items: tuple[CheckItem, ...] = tuple(check_items)
+        self._baseline_id: str = baseline_id
+        #: Startup baseline condition, passed explicitly by the composition
+        #: root from BaselineLoadResult.source — never inferred from banner
+        #: text or item counts. Valid values: normal / no-baseline / backup /
+        #: load-error / unsupported-schema.
+        if baseline_load_state is None:
+            baseline_load_state = "normal" if check_items else "no-baseline"
+        if baseline_load_state not in _BASELINE_LOAD_STATES:
+            raise ValueError(f"unknown baseline_load_state: {baseline_load_state!r}")
+        self._baseline_load_state: str = baseline_load_state
         self._document: Document | None = None
         self._results: tuple[CheckResult, ...] = ()
         self._state: UiState = UiState.EMPTY
@@ -245,7 +271,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         notice = QLabel(
-            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。检查项管理在后续任务中实现。"
+            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。点击 “检查项管理” 可编辑基准内容。"
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -263,7 +289,7 @@ class MainWindow(QMainWindow):
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
         actions.addWidget(self._cancel_button)
         self._manage_button = QPushButton("检查项管理")
-        self._manage_button.setEnabled(False)
+        self._manage_button.clicked.connect(self._on_manage_clicked)
         actions.addWidget(self._manage_button)
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)  # indeterminate
@@ -277,6 +303,9 @@ class MainWindow(QMainWindow):
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
         self._warnings_label.setVisible(False)
+        self._baseline_banner = QLabel("")
+        self._baseline_banner.setWordWrap(True)
+        self._baseline_banner.setVisible(False)
 
         # Summary + search strip.
         strip = QHBoxLayout()
@@ -289,6 +318,7 @@ class MainWindow(QMainWindow):
         self._search_input.textChanged.connect(self._populate_results)
         strip.addWidget(self._search_input)
         layout.addLayout(strip)
+        layout.addWidget(self._baseline_banner)
 
         # Filter buttons.
         self._current_filter = "全部"
@@ -321,7 +351,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._search_input.setFocus)
-        self.statusBar().showMessage("尚未导入文档")
+        if self._check_items:
+            self.statusBar().showMessage(f"已加载 {len(self._check_items)} 项检查基准")
+        else:
+            self.statusBar().showMessage("尚未加载检查基准 — 点击检查项管理以配置")
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
@@ -401,6 +434,61 @@ class MainWindow(QMainWindow):
         self._update_summary()
         self._update_actions()
         return True
+
+    # --- Baseline startup / recovery UX (Task 5) -------------------------
+
+    def apply_baseline_load(self, source: str, error: str | None = None) -> None:
+        """Record the startup baseline condition and show its banner.
+
+        ``source`` is the application-layer ``BaselineLoadResult.source``
+        token, passed explicitly — the UI never infers the condition from
+        error strings or item counts.
+        """
+        if source not in _BASELINE_LOAD_STATES:
+            raise ValueError(f"unknown baseline load source: {source!r}")
+        self._baseline_load_state = source
+        if source == "backup":
+            self.set_baseline_recovered(
+                "已从备份基准恢复 · 主基准文件不可用 · 建议检查文件系统权限"
+            )
+        elif source == "load-error":
+            self.set_baseline_failure(error or "未知错误")
+        elif source == "unsupported-schema":
+            self._baseline_banner.setStyleSheet(
+                "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+            )
+            self._baseline_banner.setText(
+                "当前基准文件由不兼容的较新版本创建。\n"
+                "本版本不会覆盖该文件。\n"
+                "请使用兼容版本打开，或先人工备份/移走该文件。"
+            )
+            self._baseline_banner.setVisible(True)
+            self.statusBar().showMessage("检查基准不兼容")
+        # normal / no-baseline: no banner, ordinary first-use experience.
+
+    def set_baseline_recovered(self, message: str) -> None:
+        """Show a persistent warning that the baseline came from backup."""
+        self._baseline_banner.setStyleSheet(
+            "background-color: #fff3cd; color: #856404; padding: 6px 10px;"
+        )
+        self._baseline_banner.setText(message)
+        self._baseline_banner.setVisible(True)
+
+    def set_baseline_failure(self, message: str) -> None:
+        """Show an explicit compatibility / load failure banner."""
+        self._baseline_banner.setStyleSheet(
+            "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+        )
+        self._baseline_banner.setText(
+            f"检查基准加载失败：{message}\n请检查 AppData 目录权限或重新配置基准。"
+        )
+        self._baseline_banner.setVisible(True)
+        self.statusBar().showMessage("检查基准加载失败")
+
+    def clear_baseline_banner(self) -> None:
+        """Hide the baseline banner; used after a successful recovery save."""
+        self._baseline_banner.clear()
+        self._baseline_banner.setVisible(False)
 
     # --- result summary & ordering -----------------------------------------
 
@@ -640,7 +728,8 @@ class MainWindow(QMainWindow):
 
     def _update_actions(self) -> None:
         s = self._state
-        self._import_button.setEnabled(s not in (UiState.IMPORTING, UiState.VERIFYING))
+        idle_for_ui = s not in (UiState.IMPORTING, UiState.VERIFYING)
+        self._import_button.setEnabled(idle_for_ui)
         can_run = self._document is not None and self.has_check_items
         runnable_states = (
             UiState.READY,
@@ -651,7 +740,8 @@ class MainWindow(QMainWindow):
         self._run_button.setEnabled(can_run and s in runnable_states)
         # Cancel only applies to verification; import has no cooperative cancel.
         self._cancel_button.setEnabled(s is UiState.VERIFYING)
-        self._manage_button.setEnabled(False)
+        # Manage baseline is allowed whenever no background work is running.
+        self._manage_button.setEnabled(idle_for_ui)
 
     # --- background import --------------------------------------------------
 
@@ -781,6 +871,152 @@ class MainWindow(QMainWindow):
     def _on_cancel_clicked(self) -> None:
         if self._cancel_event is not None:
             self._cancel_event.set()
+
+    def _on_manage_clicked(self) -> None:
+        """Open the checklist management workspace.
+
+        The dialog keeps its candidate working copy and stays open until a
+        save fully succeeds: it calls back into :meth:`_save_baseline_snapshot`
+        on 保存基准 and only closes when that returns True. Validation
+        errors, declined warnings, persistence failures and declined
+        destructive-recovery confirmations all leave the dialog open with
+        the candidate intact — a failed save never silently discards edits.
+        The current baseline and results are mutated only after persistence
+        succeeds.
+        """
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog(
+            self._check_items,
+            parent=self,
+            save_handler=self._save_baseline_snapshot,
+        )
+        dialog.exec()
+
+    def _save_baseline_snapshot(self, new_items: tuple[CheckItem, ...]) -> bool:
+        """Validate → confirm → persist → publish one candidate snapshot.
+
+        Returns True only when the snapshot was persisted AND published;
+        the checklist dialog closes only on that True. Any earlier failure
+        leaves the current baseline, results and load state untouched.
+        """
+        from design_requirement_checker.application import save_baseline_to, validate_baseline
+        from design_requirement_checker.baseline_store import (
+            UnsupportedBaselineSchemaError,
+            default_path,
+        )
+
+        validation = validate_baseline(new_items)
+
+        # --- Validation errors block save entirely ---
+        if validation.errors:
+            from PySide6.QtWidgets import QMessageBox
+
+            msg = "；".join(e.message for e in validation.errors)
+            QMessageBox.critical(
+                self,
+                "检查基准无法保存",
+                f"存在硬错误必须修复后才能保存：\n{msg}",
+            )
+            self.statusBar().showMessage("基准校验未通过 — 未保存")
+            return False
+
+        # --- Warnings are visible but do not block ---
+        if validation.warnings:
+            from PySide6.QtWidgets import QMessageBox
+
+            warn_text = "\n".join(f"· {w.message}" for w in validation.warnings)
+            reply = QMessageBox.warning(
+                self,
+                "基准存在警告",
+                f"以下警告不会阻止保存，但建议人工复核：\n\n{warn_text}\n\n仍要保存吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply is not QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage("已取消保存")
+                return False
+
+        # --- Destructive replacement over a damaged primary is explicit ---
+        if self._baseline_load_state == "load-error":
+            from PySide6.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "确认替换损坏的基准",
+                "当前基准无法读取。\n继续保存将创建新的基准并替换损坏的主文件。\n是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply is not QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage("已取消保存")
+                return False
+
+        # --- Persist first; only after success do we publish ---
+        try:
+            import uuid
+
+            baseline_path = default_path()
+            # Generate identity exactly once — on the very first save.
+            baseline_id = self._baseline_id or uuid.uuid4().hex
+            save_baseline_to(baseline_path, new_items, baseline_id)
+        except UnsupportedBaselineSchemaError:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(
+                self,
+                "基准版本不兼容",
+                "现有基准文件由不兼容的较新版本创建，本版本不会覆盖该文件。\n"
+                "请使用兼容版本打开，或先人工备份/移走该文件后再保存。",
+            )
+            self.statusBar().showMessage("基准版本不兼容 — 未保存")
+            return False
+        except (OSError, ValueError) as exc:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(
+                self,
+                "基准保存失败",
+                f"磁盘写入错误：{exc}\n\n旧基准和核查结果未受影响。",
+            )
+            self.statusBar().showMessage("基准保存失败 — 未变更")
+            return False
+
+        # --- Publish: mutate snapshot + invalidate stale results ---
+        self.set_check_items(new_items, baseline_id)
+        # A successful save installs a new primary: recovery/first-launch
+        # conditions end here and the window operates from a normal baseline.
+        if self._baseline_load_state in ("backup", "load-error", "no-baseline"):
+            self._baseline_load_state = "normal"
+            self.clear_baseline_banner()
+        self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
+        return True
+
+    def set_check_items(
+        self,
+        items: tuple[CheckItem, ...],
+        baseline_id: str = "",
+    ) -> None:
+        """Publish a new baseline snapshot and invalidate existing results.
+
+        Called after a successful save (T5.8) or after startup load (T5.7).
+        Increments the op generation so any in-flight verification workers
+        are discarded on completion. Clears results + detail view but keeps
+        the document and current state (READY if a document exists, EMPTY
+        otherwise).
+        """
+        self._op_generation += 1
+        self._check_items = items
+        if baseline_id:
+            self._baseline_id = baseline_id
+        self._results = ()
+        self._result_list.clear()
+        self._detail_view.clear()
+        if self._document is not None:
+            self._state = UiState.READY
+        else:
+            self._state = UiState.EMPTY
+        self._update_actions()
 
     def _on_verification_finished(self, outcome: VerificationOutcome, generation: int) -> bool:
         """Apply a verification outcome only if it is still current.
