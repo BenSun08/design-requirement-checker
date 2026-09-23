@@ -1,7 +1,7 @@
 """Task 5 checklist-management UI regression tests.
 
-Covers the startup baseline conditions (no-baseline / backup / load-error /
-unsupported-schema), the checklist management workflows, and candidate
+Covers the startup baseline conditions (primary / no-baseline / backup /
+load-error / unsupported-schema), the checklist management workflows, and candidate
 preservation across failed saves. No test writes to real user AppData:
 persistence targets are injected via tmp_path + monkeypatched ``default_path``.
 """
@@ -99,6 +99,35 @@ class TestStartupLoadStates:
         window = MainWindow()
         with pytest.raises(ValueError, match="unknown baseline load source"):
             window.apply_baseline_load("bogus")
+        window.close()
+
+    def test_primary_source_maps_to_normal_ui_state(self, qapp, tmp_path) -> None:
+        """HOTFIX regression: a persisted PRIMARY baseline must not crash startup.
+
+        ``application.load_baseline_from`` deliberately preserves the
+        persistence provenance token ``BaselineLoadSource.PRIMARY.value ==
+        "primary"``. That provenance token is NOT an exceptional UI state:
+        it is the ordinary successful case and must map to UI state
+        ``"normal"`` with no recovery/error banner. Previously the UI
+        rejected "primary" outright → ValueError → packaged startup crash.
+        """
+        window = MainWindow(check_items=(_item("a"),), baseline_id="bid-1")
+        window.apply_baseline_load("primary")
+
+        # Persistence provenance "primary" ≠ exceptional UI state.
+        assert window._baseline_load_state == "normal"
+        assert window._baseline_banner.isHidden()
+
+        # Normal baseline-management behavior remains available: a save from
+        # this state needs no destructive confirmation and succeeds.
+        with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
+            _dialog, mock_save, accepted = _save_via_dialog(
+                window, (_item("a"), _item("b", phrase="功能B")), tmp_path
+            )
+        mock_question.assert_not_called()
+        mock_save.assert_called_once()
+        assert accepted == [True]
+        assert window._baseline_load_state == "normal"
         window.close()
 
     def test_no_baseline_allows_first_save_without_confirmation(self, qapp, tmp_path) -> None:
