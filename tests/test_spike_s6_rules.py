@@ -1,7 +1,7 @@
 """S6 spike evidence: deterministic detection, normalization, spans and classification.
 
 All expected spans, tokens, statuses and reasons below are independent labels
-derived by hand from docs/product-spec.md, docs/domain-model.md and the S6
+derived by hand from docs/spec.md §5–§6, docs/constitution.md §7 and the S6
 allowlist design — never copied from probe output. Raw offsets are zero-based
 half-open code-point ranges over the fixture strings written here.
 """

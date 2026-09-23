@@ -2,7 +2,7 @@
 
 Use cases here coordinate domain values, the DOCX adapter and the pure
 matching rules without touching widgets. Baseline persistence and the Qt
-review workspace remain future slices (docs/implementation-plan.md).
+review workspace are coordinated here as well (docs/plan.md, docs/spec.md).
 """
 
 from __future__ import annotations

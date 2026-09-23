@@ -5,8 +5,8 @@ persistence formats (JSON file, stdlib SQLite) against the confirmed
 CheckItem domain model so a bounded engineering decision can be recorded
 before Task 5 (baseline management and persistence) is authorized.
 
-All results are deterministic and replayable. See docs/technical-spikes.md
-for the validation context.
+All results are deterministic and replayable. See docs/plan.md §4
+for the recorded persistence decision.
 """
 
 from __future__ import annotations

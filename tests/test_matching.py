@@ -1,4 +1,4 @@
-"""Task 3 production matching tests (docs/domain-model.md, merged S6 evidence).
+"""Task 3 production matching tests (docs/spec.md §5–§6, merged S6 evidence).
 
 Expected spans, statuses and reasons are independent labels derived from the
 product/domain documents and the merged S6 record — never from implementation

@@ -1,6 +1,6 @@
 """OOXML ingestion adapter: python-docx 1.2.0 + focused OOXML/XML access.
 
-Strategy validated by the executed S1/S2 spike (docs/technical-spikes.md):
+Strategy validated by the executed S1/S2 spike (docs/plan.md §4):
 python-docx opens the package and provides paragraph/table/run structure,
 while focused lxml access resolves what its API cannot see — the style
 inheritance chain (``w:basedOn``), ``docDefaults``, merged-cell grid
@@ -8,7 +8,7 @@ geometry, tracked revisions, orphan style references and excluded
 structures (content controls, text boxes, headers/footers, field codes,
 footnote/endnote references, ``w:altChunk``, smart tags, nested hyperlinks).
 
-Conservative policies enforced here (docs/product-spec.md, docs/domain-model.md):
+Conservative policies enforced here (docs/constitution.md §5–§6):
 - effective strike resolves run rPr -> character style chain -> paragraph
   style chain (rooted at the style marked ``w:default="1"``, not an assumed
   "Normal" id) -> docDefaults -> default off;

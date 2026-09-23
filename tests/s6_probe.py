@@ -5,7 +5,7 @@ like ``docx_probe.py``. It is NOT the production matching engine; it validates
 the rules Task 3 must implement against hand-labelled fixtures
 (test_spike_s6_rules.py / test_spike_s6_scale.py).
 
-Validated rule set (docs/product-spec.md Q4, docs/domain-model.md):
+Validated rule set (docs/constitution.md §7, docs/spec.md §5–§6):
 - normalization allowlist N1 whitespace-run collapse, N2 within-block line
   breaks -> single space, N3 fullwidth ASCII punctuation -> ASCII; nothing else;
 - matching in normalized space with raw span mapping (traceability);

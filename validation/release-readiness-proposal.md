@@ -32,7 +32,7 @@ historical evidence and contribute no numbers above.
 
 These are suggested **starting points for discussion**, not gates derived
 from measurements (none exist yet) and not product-document requirements.
-Project docs (product-spec.md acceptance item 8) require agreeing release
+Project docs (docs/spec.md §15 acceptance item 6) require agreeing release
 thresholds before pilot but do not define numeric values, so none are
 inherited here.
 
@@ -52,8 +52,8 @@ exist.
 
 ## 3. Pilot scope proposal (based on documented supported scope, not metrics)
 
-Evidence available today is the declared supported scope (domain-model.md,
-technical-spikes.md), not historical measurements:
+Evidence available today is the declared supported scope (docs/spec.md §7,
+docs/plan.md §4), not historical measurements:
 
 - Document types: `.docx` OOXML packages whose relevant content lives in
   body paragraphs and table-cell paragraphs.

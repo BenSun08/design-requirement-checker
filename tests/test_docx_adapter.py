@@ -1,8 +1,9 @@
 """DOCX adapter extraction tests (Task 2 vertical slice).
 
 Expected values are hand-written labels from fixture_factory.py and the
-S1/S2-validated extraction rules (docs/technical-spikes.md): effective-strike
-chain resolution preserving unknowns, stable block locations, merged cells
+S1/S2-validated extraction rules (docs/constitution.md §6, docs/plan.md §4):
+effective-strike chain resolution preserving unknowns, stable block
+locations, merged cells
 extracted once, explicit LIMITED warnings, and immutable input bytes.
 """
 
