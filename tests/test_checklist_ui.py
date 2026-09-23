@@ -322,6 +322,65 @@ class TestCandidatePreservation:
         window.close()
 
 
+class TestDuplicateAliasIdentity:
+    """R5.9 — duplicate alias texts are matched occurrence-by-occurrence so
+    each keeps its own alias_id and notes; editing never collapses them onto
+    one object, never duplicates alias_id and never silently deduplicates."""
+
+    @staticmethod
+    def _existing_item() -> CheckItem:
+        from design_requirement_checker.domain import CheckItemAlias
+
+        return CheckItem(
+            item_id="dup",
+            code="DUP",
+            name="dup-item",
+            detection_phrase="功能A",
+            aliases=(
+                CheckItemAlias(alias_id="id1", text="X", notes="n1"),
+                CheckItemAlias(alias_id="id2", text="X", notes="n2"),
+            ),
+        )
+
+    def test_duplicate_texts_keep_distinct_identities(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(self._existing_item())
+        result = dialog._build_aliases(["X", "X"])
+
+        assert [a.alias_id for a in result] == ["id1", "id2"]
+        assert [a.notes for a in result] == ["n1", "n2"]
+
+    def test_extra_duplicate_occurrence_gets_new_identity(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(self._existing_item())
+        result = dialog._build_aliases(["X", "X", "X"])
+
+        assert [a.alias_id for a in result[:2]] == ["id1", "id2"]
+        assert result[2].alias_id not in {"id1", "id2"}  # genuinely new alias
+        assert result[2].notes == ""
+
+    def test_removed_duplicate_occurrence_is_dropped(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(self._existing_item())
+        result = dialog._build_aliases(["X"])
+
+        # First occurrence consumed; the removed one is gone, not merged.
+        assert [a.alias_id for a in result] == ["id1"]
+        assert result[0].notes == "n1"
+
+    def test_alias_ids_stay_unique_after_edit(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dialog = ItemEditorDialog(self._existing_item())
+        result = dialog._build_aliases(["X", "X", "Y"])
+
+        ids = [a.alias_id for a in result]
+        assert len(ids) == len(set(ids))  # never duplicate alias_id values
+
+
 def _doc_one_block():
     """Minimal one-block document for verification setup."""
     from design_requirement_checker.domain import (

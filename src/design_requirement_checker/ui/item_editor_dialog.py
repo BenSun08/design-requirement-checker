@@ -10,6 +10,7 @@ warnings appear inline but do not block.
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict, deque
 from collections.abc import Sequence
 
 from PySide6.QtCore import Qt
@@ -157,21 +158,31 @@ class ItemEditorDialog(QDialog):
         alias texts get a fresh ``alias_id`` and empty notes (the UI
         currently does not expose alias-note editing, so ``notes=""``
         is acceptable for genuinely-new aliases).
+
+        Duplicate alias texts are matched occurrence-by-occurrence: the
+        editor keeps one line per alias, so the Nth ``"X"`` line maps to
+        the Nth existing ``"X"`` alias. ``["X"(id1), "X"(id2)]`` therefore
+        survives an edit as two distinct aliases — never collapsed onto
+        one object, never silently deduplicated, and never given a
+        duplicated ``alias_id``. Removing a line removes that occurrence.
         """
         if self._existing is None:
             return tuple(
                 CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes="") for t in new_texts
             )
 
-        # Map existing alias text → full CheckItemAlias (preserves both
-        # alias_id and notes; if there are duplicate alias texts in the
-        # existing list the last one wins — we rebuild anyway).
-        existing_by_text = {a.text: a for a in self._existing.aliases}
+        # text → pending existing aliases in source order; one occurrence
+        # is consumed (popleft) per identical editor line, so duplicate
+        # texts keep their individual identities and notes.
+        existing_by_text: dict[str, deque[CheckItemAlias]] = defaultdict(deque)
+        for alias in self._existing.aliases:
+            existing_by_text[alias.text].append(alias)
+
         result: list[CheckItemAlias] = []
         for t in new_texts:
-            existing = existing_by_text.get(t)
-            if existing is not None:
-                result.append(existing)
+            pending = existing_by_text.get(t)
+            if pending:
+                result.append(pending.popleft())
             else:
                 result.append(CheckItemAlias(alias_id=uuid.uuid4().hex, text=t, notes=""))
         return tuple(result)
