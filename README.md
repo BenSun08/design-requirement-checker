@@ -1,23 +1,27 @@
 # Design Requirement Checker
 
-**Python + PySide6 / Qt Widgets desktop application.** Document ingestion is
-implemented as a validated vertical slice: import a real `.docx`, view its
-blocks with effective-strike formatting and honest coverage warnings. The DOCX
-access strategy is backed by executed S1/S2 spike evidence. Deterministic
-verification (Task 3) is implemented as a pure matching engine on the
-validated S6 rule contract. The Qt review workspace (Task 4) is implemented:
-background import/verification, cancellation, stale-outcome suppression,
-summary counts, ordering, filters, search, result detail, multi-evidence
-navigation, source context, LIMITED coverage notice and keyboard navigation.
-Baseline management and persistence (Task 5) is implemented. Task 6 historical
-validation tooling (ground-truth manifest schema, deterministic evaluation
-harness, metrics and report rendering under `validation/` plus
-`scripts/run_historical_validation.py`) is implemented and self-tested with
-synthetic fixtures only; **historical validation itself is BLOCKED** — no
-independently labelled real/sanitized corpus has been supplied, so no measured
-precision/recall/strike/comparison metrics exist. Release thresholds remain a
-proposal pending owner approval (`validation/release-readiness-proposal.md`).
-Windows distribution (Task 7) remains pending.
+**Python + PySide6 / Qt Widgets desktop application — v0.1 internal demo.**
+
+Implemented:
+
+- DOCX ingestion (python-docx 1.2.0 + focused OOXML access, effective strike,
+  honest COMPLETE / LIMITED coverage)
+- Deterministic checking (exact / normalized / alias detection, evidence,
+  CONFIGURED / MISSING / STRUCK_OUT plus separate UNRESOLVED resolution,
+  independent description SAME / DIFFERENT comparison)
+- Qt review workspace (background import/verification, cancellation,
+  stale-outcome suppression, summary counts, ordering, filters, search,
+  multi-evidence detail, source context)
+- Local checklist management (add/edit/disable/delete with stable item/alias
+  IDs)
+- Atomic local JSON persistence with backup recovery
+- Windows portable build workflow (PyInstaller onedir)
+
+Formal historical validation (Task 6 measurement) and production deployment
+certification (Task 7 / S3 clean-machine, no-admin, offline validation) are
+**deferred** by the owner for this milestone. See
+[demo readiness](docs/demo-readiness.md) for the exact status, evidence and
+limitations.
 
 ## Development platforms
 
@@ -121,22 +125,40 @@ remains a separate historical mock.
   implementing the validated S6 contract (normalization allowlist with raw-span
   traceability, exact/normalized/alias detection, requirement-span association,
   strike coverage, classification and comparison); domain values in and out.
+- `src/design_requirement_checker/baseline_store.py`: production JSON
+  persistence for one local baseline (`QStandardPaths.AppDataLocation /
+  baseline.json`): strict `schemaVersion = 1` validation, two-temp-file atomic
+  save (primary is never moved away before the new primary is installed),
+  `.bak` backup recovery, `UnsupportedBaselineSchemaError` distinguishing
+  compatibility failure from corruption on both load and save, stable
+  baseline/item/alias identities; no Qt imports (lazy `QStandardPaths` lookup).
 - `src/design_requirement_checker/application.py`: import coordination
-  (`import_document` → Document or explicit ImportFailure) and verification
+  (`import_document` → Document or explicit ImportFailure), verification
   coordination (`verify_document` → VerificationOutcome with an explicit
-  completed/cancelled lifecycle).
+  completed/cancelled lifecycle) and baseline lifecycle
+  (`load_baseline_from`, baseline save with validation and result
+  invalidation).
 - `src/design_requirement_checker/ui/main_window.py`: Qt review workspace
   (title/toolbar, summary+search strip, QSplitter result list/detail, status);
   owns the UiState lifecycle and operation-generation stale-outcome token;
   delegates import/verification to background workers.
+- `src/design_requirement_checker/ui/checklist_dialog.py`: checklist
+  management workspace (item list, add/edit/disable/confirmed delete,
+  cross-item validation with duplicate-code rejection and
+  duplicate-name/overlapping-phrase warnings, save with explicit
+  confirmation of flagged issues).
+- `src/design_requirement_checker/ui/item_editor_dialog.py`: single-item
+  editor (required code/name/detection phrase, optional expected
+  description/category/notes, alias list; stable `item_id`/`alias_id`
+  preserved across edits).
 - `src/design_requirement_checker/ui/workers.py`: small QObject workers
   (ImportWorker, VerificationWorker) that run application use cases off the
   UI thread and emit results via signals.
-- `baseline_store.py` inside the package: documented responsibility boundary
-  only; no business APIs yet.
 - `tests/test_domain.py`, `tests/test_docx_adapter.py`, `tests/test_application.py`,
-  `tests/test_matching.py`, `tests/test_ui.py`, `tests/test_startup.py`: Task 2/Task 3
+  `tests/test_matching.py`, `tests/test_ui.py`, `tests/test_startup.py`: Task 2–5
   vertical-slice tests with hand-written expected labels.
+- `tests/test_baseline_store.py`, `tests/test_checklist_ui.py`: Task 5
+  persistence and checklist-UI tests.
 - `tests/fixture_factory.py`, `tests/docx_probe.py`, `tests/test_spike_s1_oxml_fidelity.py`,
   `tests/test_spike_s2_locations_coverage.py`: S1/S2 spike — deterministic synthetic
   DOCX fixtures, exploratory python-docx + OOXML probe, and evidence tests with
@@ -176,17 +198,21 @@ Creating an artifact in GitHub Actions does not prove Windows 10/11 deployment
 readiness. The bundle still requires clean-machine, standard-user, fully offline
 testing on both supported Windows families, including tests alongside the
 unchanged company Python 3.8 installation and on a machine without Python.
+For the v0.1 internal-demo milestone, the owner has manually smoke-tested a
+downloaded executable on a company computer; that is a demo smoke check, not
+formal Task 7 deployment validation.
 
-Future persistent baseline, configuration, and log data must use a user-writable
-platform location supplied by Qt's `QStandardPaths` (for example Application
-Support on macOS and AppData on Windows). Runtime data must not be stored beside
-the executable. Persistence itself is not implemented in this infrastructure PR.
+Persistent baseline data uses a user-writable platform location supplied by
+Qt's `QStandardPaths` (`QStandardPaths.AppDataLocation / baseline.json`, for
+example Application Support on macOS and AppData on Windows). Runtime data is
+never stored beside the executable.
 
 See [skeleton verification](docs/skeleton-verification.md) for the earlier local
 framework evidence.
 
-## Open the prototype
+## Open the prototype (historical UX prototype)
 
+`prototype/` is a historical UX reference only; it is not production behavior.
 Double-click `prototype/index.html` in a current Edge/Chrome browser. No package installation, build, server, Python, Node, Office or network connection is required for this route. Keep the four files in `prototype/` together.
 
 Optional local preview server, from the project root:
@@ -199,7 +225,7 @@ On Windows with Python already installed, use `py -m http.server 8765 --bind 127
 
 Choose **使用示例文档**, then **开始模拟核查**. Alternatively select/drag one `.docx`; only its name is used. All results and context are fixtures. Baseline edits are session-only and reset on refresh. New or materially edited items have no matching fixture and use an explicitly labelled missing demonstration, not a real document conclusion.
 
-Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion formatting, `GAG客户电动导板` for missing evidence, and `侧标志灯功能` for alias evidence. Try filters/search and 检查项管理. No real document parser/matcher, persistence, report export or production installer exists.
+Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion formatting, `GAG客户电动导板` for missing evidence, and `侧标志灯功能` for alias evidence. Try filters/search and 检查项管理. Within this browser prototype only, no real document parser/matcher, persistence, report export or production installer exists — the statements above here describe the mock, not the current production application under `src/`, which implements real DOCX parsing, deterministic matching and local baseline persistence.
 
 ## Documents
 
@@ -207,7 +233,9 @@ Review `2门控制延时` for `2s → 3s`, `昼行灯状态判断` for deletion 
 - [Domain model](docs/domain-model.md): technology-neutral concepts and invariants.
 - [UX specification](docs/ux-spec.md): workflows, states and review route.
 - [Technology options](docs/technology-options.md): five options, ordinal matrix and provisional recommendation with primary references.
-- [Technical spikes](docs/technical-spikes.md): S1/S2 and S6 executed with recorded evidence; S3 and persistence validation still planned.
+- [Technical spikes](docs/technical-spikes.md): S1/S2, S6 and the persistence-validation spike executed with recorded evidence; S3 (Windows deployment) still planned.
+- [Demo readiness](docs/demo-readiness.md): v0.1 internal-demo status, evidence and deferred validation.
+- [Demo runbook](docs/demo-runbook.md): how to run the internal demo.
 - [Delivery roadmap](docs/delivery-roadmap.md): technology-neutral milestones.
 - [Prototype verification](docs/prototype-verification.md): observed checks and limitations.
 

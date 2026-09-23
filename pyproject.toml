@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "design-requirement-checker"
 version = "0.1.0"
-description = "Local engineering DOCX checker — desktop skeleton"
+description = "Local desktop checker for engineering DOCX design requirements"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = "Apache-2.0"

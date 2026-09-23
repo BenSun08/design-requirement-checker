@@ -231,9 +231,9 @@ The current:
 src/design_requirement_checker/ui/main_window.py
 ```
 
-implements the first vertical slice: importing and inspecting a real DOCX.
+implements the full review workspace (Tasks 2–5).
 
-It builds a `QMainWindow` containing labels, layouts, buttons, and a document panel. The DOCX import button is enabled: clicking it opens a file dialog, calls the application-layer import use case, and displays the resulting filename, fingerprint, coverage warnings and text blocks (with strikethrough formatting) in a `QTextBrowser`. Parsing itself lives outside the widgets — the window only renders domain values returned by the application layer. The checking and checklist-management buttons remain disabled because that functionality has not yet been implemented.
+It builds a `QMainWindow` containing a title/toolbar, a summary+search strip, a `QSplitter` with the result list and detail pane, and a persistent status/footer. All four toolbar buttons are functional: 导入 DOCX opens a file dialog and runs the application-layer import use case in a background worker; 开始核查 runs deterministic verification off the UI thread; 取消核查 requests cooperative cancellation; 检查项管理 opens the checklist-management workspace for editing the baseline. Button enablement derives from the explicit `UiState` lifecycle (EMPTY / IMPORTING / READY / VERIFYING / COMPLETED / CANCELLED / FAILED). Parsing and matching live outside the widgets — the window only renders domain values returned by the application layer.
 
 The basic hierarchy is approximately:
 
@@ -248,17 +248,22 @@ QMainWindow
         │      "设计需求核查工具"
         │
         ├── QLabel
-        │      status notice
+        │      baseline / status notice
         │
         ├── QHBoxLayout
-        │   ├── QPushButton   (enabled: 导入 DOCX)
-        │   ├── QPushButton   (disabled)
-        │   └── QPushButton   (disabled)
+        │   ├── QPushButton   导入 DOCX
+        │   ├── QPushButton   开始核查
+        │   ├── QPushButton   取消核查
+        │   └── QPushButton   检查项管理
         │
-        └── QGroupBox "文档"
-            ├── QLabel        (summary)
-            ├── QLabel        (warnings)
-            └── QTextBrowser  (blocks)
+        ├── summary + search strip
+        │
+        ├── QSplitter
+        │   ├── result list
+        │   └── detail pane (status, comparison, expected/actual,
+        │       evidence occurrences, source context)
+        │
+        └── status / footer
 ```
 
 This introduces another important Qt concept.
@@ -301,7 +306,9 @@ You normally do **not** manually calculate pixel positions for every control. Qt
 
 ## 5. Another Qt concept you will soon encounter: signals and slots
 
-Although the skeleton does not yet make much use of them, this will become fundamental.
+The current application uses these heavily: background workers emit signals,
+and the GUI-thread handlers update widgets. But the basic pattern is easiest
+to understand with a single button:
 
 Suppose there is a button:
 
@@ -444,13 +451,13 @@ UI displays result
 
 ## 8. Application layer
 
-The planned:
+The production:
 
 ```text
 application.py
 ```
 
-will coordinate use cases such as:
+coordinates use cases such as:
 
 ```text
 Import document
@@ -461,7 +468,11 @@ Save baseline
 Invalidate old results
 ```
 
-The file is currently only a placeholder; no orchestration or background processing has been implemented yet.
+It is implemented: `import_document` returns a `Document` or an explicit
+`ImportFailure`, `verify_document` returns a `VerificationOutcome` with an
+explicit completed/cancelled lifecycle, and the baseline lifecycle
+(`load_baseline_from`, saving with validation) keeps adapter/storage failures
+translated into application outcomes.
 
 You can think of it as the conductor.
 
@@ -492,7 +503,7 @@ Display results
 
 ## 9. Domain layer
 
-The planned:
+The production:
 
 ```text
 domain.py
@@ -502,15 +513,18 @@ contains the fundamental concepts of your business problem.
 
 The repository explicitly says this file should contain UI-independent Python value models and invariant validation, with **no Qt or filesystem dependencies**.
 
-Eventually you might have concepts resembling:
+The implemented concepts are:
 
 ```python
 CheckItem
+CheckItemAlias
 Document
-Evidence
+DocumentBlock
+MatchEvidence
 CheckResult
 CheckStatus
-ComparisonStatus
+Resolution
+ComparisonState
 SourceLocation
 ```
 
@@ -537,24 +551,25 @@ That makes the business logic much easier to test.
 
 ## 10. Matching layer
 
-The planned:
+The production:
 
 ```text
 matching.py
 ```
 
-will eventually contain deterministic matching logic such as:
+contains the deterministic matching logic:
 
 ```text
 detection phrase matching
 aliases
-normalization
+normalization (validated N1–N3 allowlist with raw-offset traceability)
 evidence classification
 configured / missing / struck-out decisions
-description comparison
+UNRESOLVED handling with status unset
+description comparison as an independent dimension
 ```
 
-At present none of this has been implemented; the module remains a placeholder pending fixture validation.
+It is implemented as a pure engine: no Qt, no python-docx, no filesystem I/O.
 
 Keeping this independent from Qt means you can write:
 
@@ -570,13 +585,13 @@ That is a major advantage.
 
 ## 11. DOCX adapter
 
-The planned:
+The production:
 
 ```text
 docx_adapter.py
 ```
 
-will handle the complicated boundary between a `.docx` file and your clean Python domain objects.
+handles the complicated boundary between a `.docx` file and your clean Python domain objects.
 
 The repository reserves it for:
 
@@ -587,7 +602,13 @@ formatting interpretation
 coverage warnings
 ```
 
-but the actual DOCX implementation library has not yet been selected or validated.
+The implementation library was selected and validated by the S1/S2 spikes:
+**python-docx 1.2.0 + focused OOXML/lxml access**. Library objects never
+escape this adapter; it returns domain values. The adapter preserves
+hyperlink-contained runs, resolves effective strike through the full style
+chain, and forces `LIMITED` coverage when known unsupported structures
+(tracked revisions, field codes, text boxes, footnotes/endnotes, `w:altChunk`,
+smart tags, header/footer content) are detected.
 
 Conceptually:
 
@@ -619,7 +640,7 @@ Another adapter is:
 baseline_store.py
 ```
 
-Its planned job is:
+Its job is:
 
 ```text
 load checklist baseline
@@ -627,18 +648,24 @@ save checklist baseline
 recover from interrupted/corrupted writes
 ```
 
-Persistence is not yet implemented. The current file explicitly states that runtime data is not written beside the application.
+Persistence is implemented: one UTF-8 JSON baseline at
+`QStandardPaths.AppDataLocation / baseline.json` with `schemaVersion = 1`,
+strict validation, stable `baseline_id`/`item_id`/`alias_id`, a two-temp-file
+atomic save (the existing primary is never moved away before the new primary is
+successfully installed), a `baseline.json.bak` backup used for recovery, and
+an explicit `UnsupportedBaselineSchemaError` that keeps forward/downgrade
+incompatibility distinct from corrupt data. Runtime data is never written
+beside the application.
 
-Eventually, the architecture could look like:
+The resulting layout looks like:
 
 ```text
 Windows
 
 %APPDATA%
-└── DesignRequirementChecker
-    ├── baseline.json
-    ├── settings.json
-    └── logs/
+└── Design Requirement Checker
+    ├── baseline.json      ← the one local baseline
+    └── baseline.json.bak  ← atomic-save backup used for recovery
 ```
 
 rather than:
@@ -658,42 +685,55 @@ Qt's `QStandardPaths` is intended to help applications obtain appropriate platfo
 
 It is important not to confuse **architecture already designed** with **features already implemented**.
 
-Right now the real production application is primarily:
+The production application now implements the full internal-demo scope
+(Tasks 2–5):
 
 ```text
-startup
+real DOCX ingestion (python-docx + focused OOXML, effective strike,
+honest COMPLETE / LIMITED coverage)
 +
-minimal Qt window
+deterministic matching engine (exact / normalized / alias, evidence,
+CONFIGURED / MISSING / STRUCK_OUT, separate UNRESOLVED, independent
+description comparison)
 +
-testing infrastructure
+Qt review workspace (background import/verification, cancellation,
+stale-result suppression, summary, ordering, filters, search,
+multi-evidence detail, source context)
++
+local checklist management (add/edit/disable/delete, stable IDs)
++
+atomic local JSON persistence with backup recovery
 +
 cross-platform development configuration
 +
 Windows packaging infrastructure
 ```
 
-DOCX ingestion, matching, and persistence are still pending.
-
-So the project is currently closer to:
+What is **not** done: formal historical measurement (no labelled corpus has
+been supplied; the evaluation tooling under `validation/` exists but has
+produced no metrics), formal clean-machine / no-admin / offline Windows
+deployment validation, and release-threshold approval. See
+`docs/demo-readiness.md` for the authoritative current status.
 
 ```text
 Infrastructure foundation
 ████████████████████
 
-Qt UI skeleton
-██████████░░░░░░░░░░
+Qt UI
+████████████████████
 
 DOCX engine
-░░░░░░░░░░░░░░░░░░
+████████████████████
 
 Matching engine
-░░░░░░░░░░░░░░░░░░
+████████████████████
 
 Persistence
-░░░░░░░░░░░░░░░░░░
-```
+████████████████████
 
-rather than a nearly finished application.
+Formal historical / deployment validation
+░░░░░░░░░░░░░░░░░░░░  ← deferred for the v0.1 demo milestone
+```
 
 ---
 
@@ -760,12 +800,12 @@ That distinction comes later during packaging.
 Currently:
 
 ```toml
-dependencies = [
-    "PySide6==6.11.2"
-]
+dependencies = ["PySide6==6.11.2", "python-docx==1.2.0"]
 ```
 
-This means your direct application runtime dependency is currently just PySide6.
+This means your direct application runtime dependencies are PySide6 and
+python-docx (the DOCX access strategy selected and validated by the S1/S2
+spikes).
 
 However, PySide6 has its own dependencies, including packages such as:
 
@@ -1074,7 +1114,7 @@ You can therefore set a breakpoint, press F5, and inspect the program as it star
 
 The project already includes a useful Qt smoke test.
 
-It launches the actual application startup path in another Python process, uses Qt's `offscreen` platform, checks that exactly one main window becomes visible, verifies that unfinished action buttons remain disabled, closes the window, and verifies clean exit.
+It launches the actual application startup path in another Python process, uses Qt's `offscreen` platform, checks that exactly one main window becomes visible, verifies that the actions available at startup (导入 DOCX / 检查项管理) are enabled while the ones that cannot run yet (开始核查 / 取消核查) are disabled, closes the window, and verifies clean exit.
 
 That gives you a good example of the testing philosophy:
 
@@ -1274,9 +1314,9 @@ Suppose your Windows build environment contains:
 ```text
 Python 3.13
 PySide6
+python-docx
 your project
-future python-docx
-future other libraries
+other libraries
 ```
 
 PyInstaller analyzes imports recursively and collects the necessary files, including the active Python interpreter.
@@ -1699,9 +1739,9 @@ When you hear "dependency", distinguish these categories.
           │                   │                   │
        Runtime               Dev                Build
           │                   │                   │
-       PySide6              pytest            PyInstaller
-       future DOCX          Ruff
-       library              mypy
+   PySide6                 pytest            PyInstaller
+   python-docx             Ruff
+                          mypy
           │
           ▼
    needed by application
