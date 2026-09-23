@@ -215,6 +215,17 @@ exports/
 
 
 # ============================================================
+# Task 6 historical validation corpus
+# ============================================================
+
+# Real/sanitized historical DOCX and the working manifest stay local unless
+# explicitly approved for commit. Only examples/templates are versioned.
+validation/corpus-local/
+validation/manifest.json
+validation/reports/latest-results.json
+
+
+# ============================================================
 # Backup files
 # ============================================================
 

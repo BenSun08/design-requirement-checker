@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "documentId": "hist-001",
+  "documentFile": "corpus-local/hist-001.docx",
+  "labelledBy": "independent-human",
+  "sanitizationState": "sanitized",
+  "notes": "EXAMPLE label file showing the contract; replace with real independent labels. Do not derive expected values from checker output.",
+  "labels": [
+    {
+      "itemId": "item-0001",
+      "expectedResolution": "RESOLVED",
+      "expectedStatus": "CONFIGURED",
+      "expectedComparison": "DIFFERENT",
+      "expectedStrike": "NONE",
+      "expectedCoverage": "COMPLETE",
+      "includeInMetrics": true,
+      "notes": "function present with active evidence; requirement text states 3s while baseline expects 2s"
+    },
+    {
+      "itemId": "item-0002",
+      "expectedResolution": "RESOLVED",
+      "expectedStatus": "MISSING",
+      "includeInMetrics": true,
+      "notes": "no qualifying mention inside body/table scope"
+    },
+    {
+      "itemId": "item-0003",
+      "expectedResolution": "UNRESOLVED",
+      "includeInMetrics": false,
+      "exclusionReason": "genuinely ambiguous source wording; cannot be labelled safely",
+      "notes": "active and struck occurrences coexist"
+    }
+  ]
+}
