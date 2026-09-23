@@ -8,6 +8,8 @@ from pathlib import Path
 from design_requirement_checker.baseline_store import save_baseline
 from design_requirement_checker.domain import CheckItem
 
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+
 
 def _item(item_id: str = "a") -> CheckItem:
     return CheckItem(
@@ -124,6 +126,122 @@ assert window._check_items == ()
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "STARTUP-OK" in result.stdout
+
+
+class TestImportWorkflowStaysAlive:
+    """HOTFIX H4 — reproduce the reported user workflow end-to-end.
+
+    Start with a valid persisted PRIMARY baseline, import a real DOCX
+    through the background ImportWorker, wait for completion, run
+    verification, and confirm the process never exits unexpectedly. This
+    runs the real production composition in a subprocess so an unhandled
+    exception (the kind PyInstaller surfaces as a startup dialog) fails
+    the run.
+    """
+
+    def test_startup_then_import_then_verify_keeps_process_alive(self, tmp_path) -> None:
+        baseline_path = tmp_path / "baseline.json"
+        # Detection phrase matches text produced by fixture_factory.build_normal.
+        item = CheckItem(
+            item_id="a",
+            code="A",
+            name="name-a",
+            detection_phrase="plain body paragraph one",
+            aliases=(),
+        )
+        save_baseline(baseline_path, (item,), "bid-import-1")
+        docx_path = tmp_path / "sample.docx"
+
+        script = f"""
+import os, sys
+sys.path.insert(0, {os.path.join(_TESTS_DIR)!r})
+from pathlib import Path
+import fixture_factory
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+import design_requirement_checker.__main__ as entry
+
+docx_file = Path(os.environ["TEST_DOCX_PATH"])
+fixture_factory.build_normal(docx_file)
+
+baseline_file = Path(os.environ["TEST_BASELINE_PATH"])
+entry.default_path = lambda: baseline_file
+
+app = QApplication([])
+created = []
+stage = {{"name": "startup"}}
+failure = []
+
+def find_window():
+    for w in app.topLevelWidgets():
+        if w.isVisible():
+            return w
+    return None
+
+def step_import():
+    try:
+        window = find_window()
+        assert window is not None
+        assert window._baseline_load_state == "normal"
+        window._start_import(str(docx_file))
+        assert window.state.name == "IMPORTING"
+        stage["name"] = "importing"
+        QTimer.singleShot(50, poll_ready)
+    except Exception as exc:  # noqa: BLE001
+        failure.append(("import", repr(exc)))
+        app.quit()
+
+def poll_ready():
+    try:
+        window = find_window()
+        if window.state.name != "READY":
+            QTimer.singleShot(50, poll_ready)
+            return
+        assert window._document is not None
+        stage["name"] = "ready"
+        window._on_run_clicked()
+        assert window.state.name == "VERIFYING"
+        stage["name"] = "verifying"
+        QTimer.singleShot(50, poll_completed)
+    except Exception as exc:  # noqa: BLE001
+        failure.append((stage["name"], repr(exc)))
+        app.quit()
+
+def poll_completed():
+    try:
+        window = find_window()
+        if window.state.name != "COMPLETED":
+            QTimer.singleShot(50, poll_completed)
+            return
+        assert len(window._results) == 1
+        assert window._results[0].status.name == "CONFIGURED"
+        stage["name"] = "completed"
+        window.close()
+        app.quit()
+    except Exception as exc:  # noqa: BLE001
+        failure.append((stage["name"], repr(exc)))
+        app.quit()
+
+QTimer.singleShot(150, step_import)
+rc = entry.main([])
+assert not failure, f"workflow failed at {{failure}}"
+assert stage["name"] == "completed", stage["name"]
+print("WORKFLOW-OK rc=", rc)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env={
+                **os.environ,
+                "QT_QPA_PLATFORM": "offscreen",
+                "TEST_BASELINE_PATH": str(baseline_path),
+                "TEST_DOCX_PATH": str(docx_path),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "WORKFLOW-OK" in result.stdout
 
 
 def test_startup_shows_window_and_exits_when_closed() -> None:
