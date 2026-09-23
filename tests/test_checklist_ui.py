@@ -1,14 +1,14 @@
 """Task 5 checklist-management UI regression tests.
 
 Covers the startup baseline conditions (no-baseline / backup / load-error /
-unsupported-schema) and the checklist management workflows added in Task 5.
-No test writes to real user AppData: persistence targets are injected via
-tmp_path + monkeypatched ``default_path``.
+unsupported-schema), the checklist management workflows, and candidate
+preservation across failed saves. No test writes to real user AppData:
+persistence targets are injected via tmp_path + monkeypatched ``default_path``.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from PySide6.QtWidgets import QDialog, QMessageBox
@@ -18,7 +18,7 @@ from design_requirement_checker.domain import CheckItem
 from design_requirement_checker.ui.main_window import MainWindow
 
 
-def _item(item_id: str = "a", phrase: str = "功能") -> CheckItem:
+def _item(item_id: str = "a", phrase: str = "功能A") -> CheckItem:
     return CheckItem(
         item_id=item_id,
         code=item_id.upper(),
@@ -28,47 +28,53 @@ def _item(item_id: str = "a", phrase: str = "功能") -> CheckItem:
     )
 
 
-def _accepted_dialog(items: tuple[CheckItem, ...]) -> MagicMock:
-    """A ChecklistDialog stand-in that returns ``items`` on accept."""
-    dialog = MagicMock()
-    dialog.exec.return_value = QDialog.DialogCode.Accepted
-    dialog.current_items.return_value = items
-    return dialog
-
-
-def _run_manage_flow(
+def _save_via_dialog(
     window: MainWindow,
-    items: tuple[CheckItem, ...],
+    candidate_items: tuple[CheckItem, ...],
     tmp_path,
     *,
     save_side_effect: Exception | None = None,
+    mock_save: bool = True,
 ):
-    """Drive _on_manage_clicked with a stubbed dialog + clean validation.
+    """Open the real ChecklistDialog wired to the window save handler and
+    press 保存基准 once.
 
-    Patch targets are the defining modules because _on_manage_clicked uses
-    function-local imports. Returns the ``save_baseline_to`` mock so tests
-    can assert call counts or configure side effects via ``save_side_effect``.
+    Persistence is redirected to ``tmp_path``. By default
+    ``application.save_baseline_to`` is mocked (``save_side_effect`` injects
+    a failure); with ``mock_save=False`` the real application+store stack
+    runs against ``tmp_path`` so the persisted file itself can be asserted.
+    Returns ``(dialog, save_mock, accepted)`` where ``save_mock`` is None
+    when the real stack was used and ``accepted`` records whether the
+    dialog closed via accept().
     """
-    with (
-        patch(
-            "design_requirement_checker.ui.checklist_dialog.ChecklistDialog",
-            return_value=_accepted_dialog(items),
-        ),
-        patch(
-            "design_requirement_checker.baseline_store.default_path",
-            return_value=tmp_path / "baseline.json",
-        ),
-        patch(
-            "design_requirement_checker.application.validate_baseline",
-            return_value=MagicMock(errors=(), warnings=()),
-        ),
-        patch(
-            "design_requirement_checker.application.save_baseline_to",
-            side_effect=save_side_effect,
-        ) as save_mock,
+    from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+    def _run() -> tuple[object, list[bool]]:
+        dialog = ChecklistDialog(
+            window._check_items,
+            parent=window,
+            save_handler=window._save_baseline_snapshot,
+        )
+        dialog._items = list(candidate_items)
+        accepted: list[bool] = []
+        dialog.accepted.connect(lambda: accepted.append(True))
+        dialog._on_save_requested()
+        return dialog, accepted
+
+    with patch(
+        "design_requirement_checker.baseline_store.default_path",
+        return_value=tmp_path / "baseline.json",
     ):
-        window._on_manage_clicked()
-    return save_mock
+        if mock_save:
+            with patch(
+                "design_requirement_checker.application.save_baseline_to",
+                side_effect=save_side_effect,
+            ) as save_mock:
+                dialog, accepted = _run()
+            return dialog, save_mock, accepted
+        save_mock = None
+        dialog, accepted = _run()
+        return dialog, save_mock, accepted
 
 
 class TestStartupLoadStates:
@@ -91,12 +97,13 @@ class TestStartupLoadStates:
         assert window._baseline_banner.isHidden()
         assert window._baseline_load_state == "no-baseline"
 
-        new_items = (_item("a"), _item("b"))
+        new_items = (_item("a"),)
         with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
-            mock_save = _run_manage_flow(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
 
         mock_question.assert_not_called()  # no destructive confirmation
         mock_save.assert_called_once()
+        assert accepted == [True]
         assert window._check_items == new_items
         assert window._baseline_load_state == "normal"
         window.close()
@@ -108,9 +115,10 @@ class TestStartupLoadStates:
         assert "已从备份基准恢复" in window._baseline_banner.text()
 
         new_items = (_item("a"),)
-        _run_manage_flow(window, new_items, tmp_path)
+        _dialog, _mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
 
         # Successful save installs a new primary: recovery banner cleared.
+        assert accepted == [True]
         assert window._check_items == new_items
         assert window._baseline_load_state == "normal"
         assert window._baseline_banner.isHidden()
@@ -125,7 +133,7 @@ class TestStartupLoadStates:
 
         new_items = (_item("a"),)
         with patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical:
-            mock_save = _run_manage_flow(
+            _dialog, mock_save, accepted = _save_via_dialog(
                 window,
                 new_items,
                 tmp_path,
@@ -137,6 +145,7 @@ class TestStartupLoadStates:
         # QMessageBox.critical(parent, title, text) → title is args[1].
         titles = [call.args[1] for call in mock_critical.call_args_list]
         assert "基准版本不兼容" in titles
+        assert accepted == []  # dialog stays open
         # Nothing published; compatibility state and banner persist.
         assert window._check_items == ()
         assert window._baseline_load_state == "unsupported-schema"
@@ -154,12 +163,13 @@ class TestStartupLoadStates:
             "PySide6.QtWidgets.QMessageBox.question",
             return_value=QMessageBox.StandardButton.No,
         ) as mock_question:
-            mock_save = _run_manage_flow(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
 
         mock_question.assert_called_once()  # destructive replacement is explicit
         prompt = mock_question.call_args.args[2]
         assert "当前基准无法读取" in prompt
         mock_save.assert_not_called()
+        assert accepted == []
         assert window._check_items == ()
         assert window._baseline_load_state == "load-error"
         assert not window._baseline_banner.isHidden()
@@ -174,10 +184,11 @@ class TestStartupLoadStates:
             "PySide6.QtWidgets.QMessageBox.question",
             return_value=QMessageBox.StandardButton.Yes,
         ) as mock_question:
-            mock_save = _run_manage_flow(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
 
         mock_question.assert_called_once()
         mock_save.assert_called_once()
+        assert accepted == [True]
         assert window._check_items == new_items
         assert window._baseline_load_state == "normal"
         assert window._baseline_banner.isHidden()
@@ -187,7 +198,169 @@ class TestStartupLoadStates:
         window = MainWindow(check_items=(_item("a"),))
         assert window._baseline_load_state == "normal"
         with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
-            _run_manage_flow(window, (_item("a"), _item("b")), tmp_path)
+            _dialog, _mock_save, accepted = _save_via_dialog(
+                window, (_item("a"), _item("b", phrase="功能B")), tmp_path
+            )
         mock_question.assert_not_called()
-        assert window._check_items == (_item("a"), _item("b"))
+        assert accepted == [True]
+        assert window._check_items == (_item("a"), _item("b", phrase="功能B"))
         window.close()
+
+
+class TestCandidatePreservation:
+    """R5.8 — failed validation/persistence keeps the dialog open with the
+    candidate intact; the current baseline and results never change."""
+
+    def test_dialog_accepts_only_when_handler_succeeds(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        accepted: list[bool] = []
+
+        dialog = ChecklistDialog((_item("a"),), save_handler=lambda _items: False)
+        dialog.accepted.connect(lambda: accepted.append(True))
+        dialog._on_save_requested()
+        assert accepted == []
+        assert dialog.result() != QDialog.DialogCode.Accepted
+        assert len(dialog.current_items()) == 1  # candidate rows remain
+
+        dialog2 = ChecklistDialog((_item("a"),), save_handler=lambda _items: True)
+        dialog2.accepted.connect(lambda: accepted.append(True))
+        dialog2._on_save_requested()
+        assert accepted == [True]
+        assert dialog2.result() == QDialog.DialogCode.Accepted
+
+    def test_duplicate_code_blocks_save_and_candidate_remains(self, qapp, tmp_path) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        dup = CheckItem(
+            item_id="dup-1",
+            code="A",  # same code as _item("a")
+            name="other-name",
+            detection_phrase="功能X",
+            aliases=(),
+        )
+        candidate = (_item("a"), dup)
+
+        with patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical:
+            _dialog, mock_save, accepted = _save_via_dialog(window, candidate, tmp_path)
+
+        mock_save.assert_not_called()  # validation error blocks persistence
+        mock_critical.assert_called_once()  # reason shown
+        assert accepted == []  # dialog stays open with candidate
+        assert window._check_items == (_item("a"),)  # current baseline untouched
+        window.close()
+
+    def test_warning_declined_keeps_candidate_and_dialog_open(self, qapp, tmp_path) -> None:
+        # Same detection phrase on both items → overlap warning (not error).
+        window = MainWindow(check_items=(_item("a"),))
+        candidate = (_item("a"), _item("b", phrase="功能A"))
+
+        with (
+            patch(
+                "PySide6.QtWidgets.QMessageBox.warning",
+                return_value=QMessageBox.StandardButton.No,
+            ) as mock_warning,
+            patch("design_requirement_checker.application.save_baseline_to") as mock_save,
+        ):
+            _dialog, _unused, accepted = _save_via_dialog(window, candidate, tmp_path)
+
+        mock_warning.assert_called_once()
+        mock_save.assert_not_called()
+        assert accepted == []
+        assert window._check_items == (_item("a"),)
+        window.close()
+
+    def test_disk_failure_keeps_candidate_and_current_state(self, qapp, tmp_path) -> None:
+        from design_requirement_checker.matching import verify
+
+        existing = (_item("a"),)
+        document = _doc_one_block()
+        window = MainWindow(check_items=existing)
+        window.set_document(document)
+        gen0 = window.start_verification()
+        window.complete_verification(gen0, verify(document, existing))
+        assert len(window.results) == 1
+        gen_before = window._op_generation
+
+        candidate = (_item("a"), _item("b", phrase="功能B"))
+        with patch("PySide6.QtWidgets.QMessageBox.critical"):
+            _dialog, mock_save, accepted = _save_via_dialog(
+                window,
+                candidate,
+                tmp_path,
+                save_side_effect=OSError("disk full"),
+            )
+
+        mock_save.assert_called_once()
+        assert accepted == []  # candidate still open
+        assert window._check_items == existing  # current baseline unchanged
+        assert len(window.results) == 1  # results unchanged
+        assert window._op_generation == gen_before  # no invalidation
+        window.close()
+
+    def test_successful_save_publishes_and_closes_dialog(self, qapp, tmp_path) -> None:
+        from design_requirement_checker.matching import verify
+
+        existing = (_item("a"),)
+        document = _doc_one_block()
+        window = MainWindow(check_items=existing)
+        window.set_document(document)
+        gen0 = window.start_verification()
+        window.complete_verification(gen0, verify(document, existing))
+        assert len(window.results) == 1
+
+        candidate = (_item("a"), _item("b", phrase="功能B"))
+        # Real application+store stack against tmp_path: prove real persistence.
+        _dialog, save_mock, accepted = _save_via_dialog(
+            window, candidate, tmp_path, mock_save=False
+        )
+
+        assert save_mock is None
+        assert accepted == [True]
+        assert window._check_items == candidate  # published
+        assert window.results == ()  # invalidated
+        assert (tmp_path / "baseline.json").exists()  # persisted via real store
+        window.close()
+
+
+def _doc_one_block():
+    """Minimal one-block document for verification setup."""
+    from design_requirement_checker.domain import (
+        BlockType,
+        Coverage,
+        Document,
+        DocumentBlock,
+        DocumentLocation,
+        TextRun,
+    )
+
+    text = "功能A"
+    location = DocumentLocation(
+        document_id="doc-ui",
+        block_id="body:p0",
+        block_type=BlockType.PARAGRAPH,
+        part="body",
+        paragraph_index=0,
+    )
+    block = DocumentBlock(
+        block_id="body:p0",
+        block_type=BlockType.PARAGRAPH,
+        text=text,
+        runs=(
+            TextRun(
+                text=text,
+                start_offset=0,
+                end_offset=len(text),
+                effective_strike=False,
+                strike_origin="run-direct",
+                strike_reason="",
+            ),
+        ),
+        location=location,
+    )
+    return Document(
+        document_id="doc-ui",
+        filename="ui.docx",
+        content_fingerprint="ui-fingerprint",
+        blocks=(block,),
+        coverage=Coverage.COMPLETE,
+    )

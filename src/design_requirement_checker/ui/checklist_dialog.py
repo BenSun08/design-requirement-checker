@@ -2,15 +2,19 @@
 
 Editable baseline workspace. The dialog renders the current snapshot in a
 QTableWidget, lets the reviewer Add/Edit items via ItemEditorDialog, and
-returns the updated immutable tuple to MainWindow on accept. Save /
-persistence / result invalidation live in later T5.x subtasks — this
-dialog only mutates its own in-memory working copy. Qt-only: never touches
-JSON or matching directly.
+hands the updated immutable tuple to a save handler on 保存基准. The handler
+(also Task 5 UI wiring) validates and persists; only when it reports success
+does this dialog ``accept()`` and close. On validation or persistence
+failure the dialog stays open with the candidate rows intact, so an
+unsuccessful save never silently discards the reviewer's edits. Save /
+persistence / result invalidation live in MainWindow — this dialog only
+mutates its own in-memory working copy. Qt-only: never touches JSON or
+matching directly.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -44,17 +48,25 @@ class ChecklistDialog(QDialog):
     """View and manage the current baseline in-memory working copy.
 
     ``items`` is the immutable snapshot passed from MainWindow on open.
-    Closing with ``QDialog.Accepted`` signals MainWindow should publish
-    and persist; with ``Rejected`` the changes are discarded.
+    ``save_handler`` receives the candidate snapshot when the reviewer
+    requests a save; it must return ``True`` only after validation and
+    persistence both succeeded — only then does the dialog accept and
+    close. Without a handler (stand-alone use) Save simply accepts.
     """
 
-    def __init__(self, items: Sequence[CheckItem], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        items: Sequence[CheckItem],
+        parent: QWidget | None = None,
+        save_handler: Callable[[tuple[CheckItem, ...]], bool] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("检查项管理")
         self.resize(1040, 640)
         self.setMinimumSize(800, 480)
 
         self._items: list[CheckItem] = list(items)
+        self._save_handler = save_handler
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 14, 16, 14)
@@ -105,10 +117,25 @@ class ChecklistDialog(QDialog):
         )
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存基准")
         buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._on_save_requested)
         buttons.rejected.connect(self.reject)
         footer.addWidget(buttons)
         outer.addLayout(footer)
+
+    def _on_save_requested(self) -> None:
+        """Handle 保存基准 without closing on failure.
+
+        With a handler, the dialog closes (``accept()``) only when the
+        handler reports a fully successful validate+persist cycle. On
+        failure the handler has already shown the reason; the candidate
+        rows remain visible and editable. Without a handler the dialog
+        accepts directly (stand-alone usage).
+        """
+        if self._save_handler is None:
+            self.accept()
+            return
+        if self._save_handler(self.current_items()):
+            self.accept()
 
     def _populate_table(self) -> None:
         self._table.setRowCount(len(self._items))

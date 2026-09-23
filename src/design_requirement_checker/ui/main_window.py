@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -876,35 +875,37 @@ class MainWindow(QMainWindow):
     def _on_manage_clicked(self) -> None:
         """Open the checklist management workspace.
 
-        On Accept: validate → persist → publish → invalidate old results.
-        On Reject (including the Close button): discard changes, leave
-        everything untouched. Persistence errors leave the old baseline and
-        old results in place — only a successful save mutates state.
-
-        Recovery states change the flow explicitly:
-
-          - ``load-error`` — replacing the damaged primary is destructive,
-            so it requires an explicit confirmation before persisting.
-          - ``backup`` — a successful save installs a new primary and clears
-            the recovery banner (the application no longer runs from backup).
-          - ``unsupported-schema`` — the store refuses to overwrite the
-            newer-schema file; the save surfaces a compatibility failure.
+        The dialog keeps its candidate working copy and stays open until a
+        save fully succeeds: it calls back into :meth:`_save_baseline_snapshot`
+        on 保存基准 and only closes when that returns True. Validation
+        errors, declined warnings, persistence failures and declined
+        destructive-recovery confirmations all leave the dialog open with
+        the candidate intact — a failed save never silently discards edits.
+        The current baseline and results are mutated only after persistence
+        succeeds.
         """
-        from design_requirement_checker.application import (
-            save_baseline_to,
-            validate_baseline,
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog(
+            self._check_items,
+            parent=self,
+            save_handler=self._save_baseline_snapshot,
         )
+        dialog.exec()
+
+    def _save_baseline_snapshot(self, new_items: tuple[CheckItem, ...]) -> bool:
+        """Validate → confirm → persist → publish one candidate snapshot.
+
+        Returns True only when the snapshot was persisted AND published;
+        the checklist dialog closes only on that True. Any earlier failure
+        leaves the current baseline, results and load state untouched.
+        """
+        from design_requirement_checker.application import save_baseline_to, validate_baseline
         from design_requirement_checker.baseline_store import (
             UnsupportedBaselineSchemaError,
             default_path,
         )
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
 
-        dialog = ChecklistDialog(self._check_items, parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        new_items = dialog.current_items()
         validation = validate_baseline(new_items)
 
         # --- Validation errors block save entirely ---
@@ -918,7 +919,7 @@ class MainWindow(QMainWindow):
                 f"存在硬错误必须修复后才能保存：\n{msg}",
             )
             self.statusBar().showMessage("基准校验未通过 — 未保存")
-            return
+            return False
 
         # --- Warnings are visible but do not block ---
         if validation.warnings:
@@ -934,7 +935,7 @@ class MainWindow(QMainWindow):
             )
             if reply is not QMessageBox.StandardButton.Yes:
                 self.statusBar().showMessage("已取消保存")
-                return
+                return False
 
         # --- Destructive replacement over a damaged primary is explicit ---
         if self._baseline_load_state == "load-error":
@@ -949,7 +950,7 @@ class MainWindow(QMainWindow):
             )
             if reply is not QMessageBox.StandardButton.Yes:
                 self.statusBar().showMessage("已取消保存")
-                return
+                return False
 
         # --- Persist first; only after success do we publish ---
         try:
@@ -969,7 +970,7 @@ class MainWindow(QMainWindow):
                 "请使用兼容版本打开，或先人工备份/移走该文件后再保存。",
             )
             self.statusBar().showMessage("基准版本不兼容 — 未保存")
-            return
+            return False
         except (OSError, ValueError) as exc:
             from PySide6.QtWidgets import QMessageBox
 
@@ -979,7 +980,7 @@ class MainWindow(QMainWindow):
                 f"磁盘写入错误：{exc}\n\n旧基准和核查结果未受影响。",
             )
             self.statusBar().showMessage("基准保存失败 — 未变更")
-            return
+            return False
 
         # --- Publish: mutate snapshot + invalidate stale results ---
         self.set_check_items(new_items, baseline_id)
@@ -989,6 +990,7 @@ class MainWindow(QMainWindow):
             self._baseline_load_state = "normal"
             self.clear_baseline_banner()
         self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
+        return True
 
     def set_check_items(
         self,
