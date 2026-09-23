@@ -116,11 +116,11 @@ This revision supersedes the earlier eight-week plan's stack-selection tasks. It
 
 ## Current state and global constraints
 
-- Existing production code is a desktop skeleton alongside the historical browser mock. The repository has one shared Python source tree for macOS and Windows development; neither is Python parser or Windows deployment evidence.
+- **2026-09-23 demo-milestone update:** production Tasks 2–5 (DOCX ingestion, deterministic verification, Qt review workspace, baseline management and persistence) are implemented on `main`. The earlier state this section described — "existing production code is a desktop skeleton alongside the historical browser mock" — no longer holds; the browser mock under `prototype/` remains historical only. macOS and Windows remain development/CI platforms, not deployment evidence.
 - Production target is Windows 10 and Windows 11 x64, with no administrator/installation privileges. No user-installed Python/Qt/Office prerequisite. Exact Windows builds and compatible runtime versions are S3 inputs.
 - Initial distribution, extraction/installation, first launch and checking must be completely offline; original documents must remain unchanged. No target-side online bootstrapper, pip install, activation or dependency download.
 - GitHub Actions validates Python 3.13 on macOS and Windows. The manual Windows-only build workflow creates a PyInstaller onedir artifact; CI packaging is an input to S3, not completion of S3.
-- Future persistent baseline/configuration/log paths are platform adapters selected through Qt `QStandardPaths`; the domain and application layers remain OS-independent and the executable directory is not a writable-data location.
+- Persistent baseline data uses a platform adapter selected through Qt `QStandardPaths` (`AppDataLocation/baseline.json`, implemented in Task 5); the domain and application layers remain OS-independent and the executable directory is not a writable-data location. Configuration/log paths remain future work.
 - One locally maintained baseline. Required id/code/name/detectionPhrase, optional expectedDescription, explicit aliases/category/notes/enabled. No automatic phrase extractor or order-template framework.
 - Three CheckStatus values plus separate UNRESOLVED resolution/status unset. Active/deleted coexistence, partial/unknown strike, ambiguous identity and conflicting active key values are unresolved.
 - Keep all qualifying occurrences. A single established function with a changed expected value can be CONFIGURED + DIFFERENT; no expected description/unsupported comparison is NOT_COMPARED.
@@ -133,13 +133,13 @@ This revision supersedes the earlier eight-week plan's stack-selection tasks. It
 |---|---|
 | A Product rules | Owner confirmed items 1–7; do not ask again for the same policy. Validate transformation and requirement-span details against fixtures. |
 | B Production stack | Closed: Python + PySide6 Qt Widgets selected. No finalist comparison or automatic fallback to another framework. |
-| C Technical readiness | Cross-platform CI and the initial PyInstaller onedir configuration exist. S1/S2/S3/S6 evidence remains pending; a CI artifact does not prove clean-machine offline deployment. |
+| C Technical readiness | Cross-platform CI and the initial PyInstaller onedir configuration exist. S1/S2/S6 and persistence-validation evidence executed; S3 remains pending; a CI artifact does not prove clean-machine offline deployment. |
 | D Execution authorization | This documentation update starts no probes or production code. Obtain authorization for the next bounded work package. |
 | E Pilot | Labelled fixture/historical validation and no-admin Windows deployment must pass; owner agrees release thresholds. |
 
 ## Proposed source responsibilities
 
-Paths below are planned, not existing files. Keep the small module structure; split only when a real responsibility grows.
+**2026-09-23 note:** all paths below now exist as production code (Tasks 2–5); the table was originally written as a plan. Keep the small module structure; split only when a real responsibility grows.
 
 | Proposed path | Responsibility |
 |---|---|
@@ -150,6 +150,7 @@ Paths below are planned, not existing files. Keep the small module structure; sp
 | `src/design_requirement_checker/baseline_store.py` | One local baseline load/save/recovery in a user-writable location |
 | `src/design_requirement_checker/ui/main_window.py` | Qt Widgets import and split review workspace |
 | `src/design_requirement_checker/ui/checklist_dialog.py` | Baseline editing/validation and detectionPhrase field |
+| `src/design_requirement_checker/ui/item_editor_dialog.py` | Single-item add/edit with stable item/alias identities |
 | `src/design_requirement_checker/__main__.py` | Application startup/composition only |
 | `tests/fixtures/`, `tests/test_domain.py`, `tests/test_matching.py`, `tests/test_docx_adapter.py` | Independent expected outcomes and deterministic tests |
 | `tests/test_application.py`, `tests/test_baseline_store.py`, `tests/test_ui.py` | Invalidation/cancellation, save/recovery and focused Qt interactions |
@@ -229,6 +230,26 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 **Acceptance:** engineers can maintain the baseline without editing source; current-order enabled items determine the run; failures never silently discard edits or corrupt the saved baseline.
 
 ## Task 6 — Historical validation and release readiness
+
+**2026-09-23 demo-milestone decision:** the owner has chosen to stop formal
+validation work for the current milestone. The project closes as
+**v0.1 Internal Demo** (see [demo-readiness.md](demo-readiness.md)). Task 6
+real historical measurement is **deferred** because the independent
+historical corpus is unavailable. Task 7 formal deployment validation is
+**deferred** because the immediate goal is an internal usable demo. Neither
+task is considered completed, and the checklists below stay unchecked.
+
+Demo milestone acceptance:
+
+- production Tasks 2–5 implemented
+- repository CI green (macOS + Windows, Python 3.13)
+- Windows portable artifact build available
+- owner manually smoke-tested the downloaded executable on a company computer
+- formal release-readiness claims explicitly excluded
+
+The Task 6 validation tooling record below is preserved; the historical
+validation infrastructure under `validation/` stays in the repository for
+future use and must not be deleted.
 
 **Artifacts:** sanitized labelled corpus, measured validation report, regression fixtures, known limitations.
 
@@ -319,8 +340,13 @@ remaining Task 1 probes (S3) stay pending and require their own
 authorization and Windows/sample access; packaged backup/replacement
 verification and clean-machine/no-admin deployment evidence stay pending for
 Task 7 — green GitHub Actions CI on macOS/Windows is source-level evidence
-only, not clean-machine deployment evidence. No step here re-opens the
-selected stack or starts the next slice automatically.
+only, not clean-machine deployment evidence. **2026-09-23 demo-milestone
+decision (owner):** formal Task 6 measurement and Task 7 deployment
+validation are deferred; the project closes as v0.1 Internal Demo (see
+[demo-readiness.md](demo-readiness.md)). Future agent work defaults to bug
+fixes, small demo usability fixes and documentation maintenance; starting
+Task 6, Task 7 or V0.2 features requires explicit owner authorization. No
+step here re-opens the selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 
