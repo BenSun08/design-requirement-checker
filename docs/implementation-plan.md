@@ -232,6 +232,34 @@ Do not create a generic repository layer, protocol framework or internal plugin 
 
 **Artifacts:** sanitized labelled corpus, measured validation report, regression fixtures, known limitations.
 
+**2026-09-23 execution record (partial — evidence BLOCKED):** The Task 6
+evaluation infrastructure is implemented on branch
+`task6-historical-validation`: `validation/schema.py` (versioned
+ground-truth contract, schemaVersion 1, validated independently of the
+production `CheckResult` models), `validation/harness.py` plus
+`scripts/run_historical_validation.py` (deterministic evaluator that runs the
+production path `import_document` → `verify_document` and compares predictions
+with independent labels; matching logic is never duplicated),
+`validation/metrics.py` (presence precision/recall with UNRESOLVED excluded
+from the 2×2 table and reported separately, status/strike/comparison accuracy,
+unresolved rate, LIMITED-coverage and unsupported-warning rates — every metric
+with an explicit numerator/denominator, zero denominators rendered `N/A`), and
+`validation/report.py` (measured-report rendering that fails closed for purely
+synthetic runs). The ground-truth separation rule and the corpus preparation
+workflow are documented in `validation/README.md`; a real/sanitized corpus
+stays local via `.gitignore` (`validation/corpus-local/`).
+`validation/release-readiness-proposal.md` records the thresholds and pilot
+scope as **proposals with PENDING OWNER APPROVAL fields — none accepted**.
+
+**BLOCKED:** no real/sanitized independently labelled historical corpus has
+been supplied to this repository, so no measurement has been performed. All
+metrics are NOT MEASURED (denominator 0), no discrepancies have been classified
+and no historical regression fixes were made. The synthetic evaluator
+self-tests (552 tests pass locally) prove tooling and implementation
+consistency only — they are explicitly **not** historical validation evidence.
+Task 6 therefore remains incomplete and blocked on evidence; the checklist
+below stays unchecked until a corpus is supplied and T6.4–T6.8 are executed.
+
 - [ ] Label examples independently of checker outputs and include ambiguous/unsupported cases.
 - [ ] Measure precision/recall, false positives/negatives, strike accuracy, unresolved rate, coverage/unsupported rate and review-time change, with denominators.
 - [ ] Classify discrepancies as extraction, matching, normalization, configuration, policy or unsupported-scope failures.
@@ -279,14 +307,20 @@ strict validation, unsupported-schema protection on load AND save), the
 checklist management/editing workspace with stable item/alias identities,
 explicit startup recovery states (no-baseline / backup / load-error /
 unsupported-schema), failed-save candidate preservation, and result
-invalidation with stale-verification suppression. The remaining Task 1
-probes (S3) stay pending and require their own authorization and
-Windows/sample access; packaged backup/replacement verification and
-clean-machine/no-admin deployment evidence stay pending for Task 7 — green
-GitHub Actions CI on macOS/Windows is source-level evidence only, not
-clean-machine deployment evidence. The next proposed work package is Task 6
-(historical validation), pending explicit execution authorization. No step
-here re-opens the selected stack or starts the next slice automatically.
+invalidation with stale-verification suppression. Task 6 (historical
+validation) was executed 2026-09-23 under owner authorization on branch
+`task6-historical-validation`: the validation contract, deterministic
+evaluator, precise metrics and report rendering are implemented and
+self-tested, but the task is **BLOCKED** — no real/sanitized independently
+labelled historical corpus has been supplied, so no measurement exists (all
+metrics NOT MEASURED, denominator 0) and no release threshold has been
+agreed. The next Task 6 step requires corpus evidence, not code. The
+remaining Task 1 probes (S3) stay pending and require their own
+authorization and Windows/sample access; packaged backup/replacement
+verification and clean-machine/no-admin deployment evidence stay pending for
+Task 7 — green GitHub Actions CI on macOS/Windows is source-level evidence
+only, not clean-machine deployment evidence. No step here re-opens the
+selected stack or starts the next slice automatically.
 
 ## Confirmed Python 3.8 and fully offline environment
 
