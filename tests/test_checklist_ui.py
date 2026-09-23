@@ -8,14 +8,24 @@ persistence targets are injected via tmp_path + monkeypatched ``default_path``.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import uuid
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
-from design_requirement_checker.domain import CheckItem
-from design_requirement_checker.ui.main_window import MainWindow
+from design_requirement_checker.domain import (
+    BlockType,
+    CheckItem,
+    CheckItemAlias,
+    Coverage,
+    Document,
+    DocumentBlock,
+    DocumentLocation,
+    TextRun,
+)
+from design_requirement_checker.ui.main_window import MainWindow, UiState
 
 
 def _item(item_id: str = "a", phrase: str = "功能A") -> CheckItem:
@@ -381,45 +391,409 @@ class TestDuplicateAliasIdentity:
         assert len(ids) == len(set(ids))  # never duplicate alias_id values
 
 
-def _doc_one_block():
-    """Minimal one-block document for verification setup."""
-    from design_requirement_checker.domain import (
-        BlockType,
-        Coverage,
-        Document,
-        DocumentBlock,
-        DocumentLocation,
-        TextRun,
+def _run(text: str, strike: bool | None = False) -> TextRun:
+    return TextRun(
+        text=text,
+        start_offset=0,
+        end_offset=len(text),
+        effective_strike=strike,
+        strike_origin="run-direct" if strike is not None else "default-off",
+        strike_reason="" if strike is not None else "test-unknown-formatting",
     )
 
-    text = "功能A"
+
+def _block(block_id: str, text: str) -> DocumentBlock:
+    para_index = int(block_id.removeprefix("body:p"))
     location = DocumentLocation(
         document_id="doc-ui",
-        block_id="body:p0",
+        block_id=block_id,
         block_type=BlockType.PARAGRAPH,
         part="body",
-        paragraph_index=0,
+        paragraph_index=para_index,
     )
-    block = DocumentBlock(
-        block_id="body:p0",
+    return DocumentBlock(
+        block_id=block_id,
         block_type=BlockType.PARAGRAPH,
         text=text,
-        runs=(
-            TextRun(
-                text=text,
-                start_offset=0,
-                end_offset=len(text),
-                effective_strike=False,
-                strike_origin="run-direct",
-                strike_reason="",
-            ),
-        ),
+        runs=(_run(text),),
         location=location,
     )
+
+
+def _document(*blocks: DocumentBlock) -> Document:
     return Document(
         document_id="doc-ui",
         filename="ui.docx",
         content_fingerprint="ui-fingerprint",
-        blocks=(block,),
+        blocks=blocks,
         coverage=Coverage.COMPLETE,
     )
+
+
+def _doc_one_block() -> Document:
+    """Minimal one-block document for verification setup."""
+    return _document(_block("body:p0", "功能A"))
+
+
+def _with_alias(
+    item: CheckItem, *, text: str = "alt-phrase", notes: str = "alias note"
+) -> CheckItem:
+    """Return a copy of ``item`` carrying one stable alias with given notes."""
+    alias = CheckItemAlias(alias_id=uuid.uuid4().hex, text=text, notes=notes)
+    return CheckItem(
+        item_id=item.item_id,
+        code=item.code,
+        name=item.name,
+        detection_phrase=item.detection_phrase,
+        aliases=(alias,),
+        category=item.category,
+        expected_description=item.expected_description,
+        enabled=item.enabled,
+        notes=item.notes,
+    )
+
+
+class TestChecklistWorkspace:
+    """Dialog-level working-copy behavior: rendering, add/edit wiring,
+    disable/re-enable and confirmed delete. The dialog only mutates its own
+    working copy; save/publish behavior lives in the MainWindow flow tests."""
+
+    def test_empty_baseline_renders_zero_rows(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog(())
+        assert dialog._table.rowCount() == 0
+        assert dialog._count_label.text() == "共 0 项"
+        assert dialog.current_items() == ()
+
+    def test_existing_rows_rendered(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"), _item("b")))
+        assert dialog._table.rowCount() == 2
+        assert dialog._count_label.text() == "共 2 项"
+        assert dialog._table.item(0, 0).text() == "A"  # code column
+        assert dialog._table.item(0, 5).text() == "启用"
+
+    def test_toggle_disable_and_reenable(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        dialog._table.selectRow(0)
+        dialog._on_toggle_enabled()
+        assert dialog.current_items()[0].enabled is False
+        assert dialog._table.item(0, 5).text() == "已禁用"
+        dialog._on_toggle_enabled()
+        assert dialog.current_items()[0].enabled is True
+        assert dialog._table.item(0, 5).text() == "启用"
+
+    def test_delete_cancel_keeps_item(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        dialog._table.selectRow(0)
+        with patch(
+            "PySide6.QtWidgets.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ):
+            dialog._on_delete_selected()
+        assert len(dialog.current_items()) == 1
+
+    def test_delete_confirm_removes_item(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        dialog._table.selectRow(0)
+        with patch(
+            "PySide6.QtWidgets.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            dialog._on_delete_selected()
+        assert dialog.current_items() == ()
+
+    def test_add_item_appends_with_fresh_identity(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        fresh = CheckItem(
+            item_id="new-id",
+            code="B",
+            name="name-b",
+            detection_phrase="功能B",
+            aliases=(),
+        )
+        editor = MagicMock()
+        editor.exec.return_value = QDialog.DialogCode.Accepted
+        editor.candidate.return_value = fresh
+        with patch(
+            "design_requirement_checker.ui.item_editor_dialog.ItemEditorDialog",
+            return_value=editor,
+        ) as mock_editor:
+            dialog._on_add()
+
+        mock_editor.assert_called_once_with(existing=None, parent=dialog)
+        assert dialog.current_items() == (_item("a"), fresh)
+        assert dialog._table.rowCount() == 2
+
+    def test_edit_selected_replaces_row_keeping_identity(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        edited = CheckItem(
+            item_id="a",  # editor preserves the stable item_id
+            code="A",
+            name="renamed",
+            detection_phrase="功能A",
+            aliases=(),
+        )
+        editor = MagicMock()
+        editor.exec.return_value = QDialog.DialogCode.Accepted
+        editor.candidate.return_value = edited
+        dialog._table.selectRow(0)
+        with patch(
+            "design_requirement_checker.ui.item_editor_dialog.ItemEditorDialog",
+            return_value=editor,
+        ) as mock_editor:
+            dialog._on_edit_selected()
+
+        assert mock_editor.call_args.kwargs["existing"] == _item("a")
+        assert dialog.current_items() == (edited,)
+        assert dialog._table.rowCount() == 1  # replaced, not appended
+
+    def test_edit_cancelled_keeps_row(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        dialog = ChecklistDialog((_item("a"),))
+        editor = MagicMock()
+        editor.exec.return_value = QDialog.DialogCode.Rejected
+        dialog._table.selectRow(0)
+        with patch(
+            "design_requirement_checker.ui.item_editor_dialog.ItemEditorDialog",
+            return_value=editor,
+        ):
+            dialog._on_edit_selected()
+        assert dialog.current_items() == (_item("a"),)
+
+    def test_close_without_save_never_calls_handler(self, qapp) -> None:
+        """Closing the dialog (关闭) is not a save: the handler must stay
+        untouched so the current baseline/results can never change."""
+        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+
+        handler = MagicMock(return_value=True)
+        dialog = ChecklistDialog((_item("a"),), save_handler=handler)
+        dialog.reject()
+        handler.assert_not_called()
+
+
+class TestItemEditorFields:
+    """Required-field enforcement and stable identity in the item editor."""
+
+    def test_add_empty_code_blocks_accept(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        dlg._code_edit.setText("")
+        dlg._name_edit.setText("Something")
+        dlg._phrase_edit.setText("Something")
+        with patch("PySide6.QtWidgets.QMessageBox.warning"):
+            dlg._on_save()
+        assert dlg.candidate() is None
+
+    def test_add_empty_name_blocks_accept(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        dlg._code_edit.setText("C1")
+        dlg._name_edit.setText("")
+        dlg._phrase_edit.setText("Something")
+        with patch("PySide6.QtWidgets.QMessageBox.warning"):
+            dlg._on_save()
+        assert dlg.candidate() is None
+
+    def test_add_empty_phrase_blocks_accept(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        dlg._code_edit.setText("C1")
+        dlg._name_edit.setText("N")
+        dlg._phrase_edit.setText("")
+        with patch("PySide6.QtWidgets.QMessageBox.warning"):
+            dlg._on_save()
+        assert dlg.candidate() is None
+
+    def test_add_empty_expected_description_allowed(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        dlg._code_edit.setText("C1")
+        dlg._name_edit.setText("N")
+        dlg._phrase_edit.setText("P")
+        dlg._expected_edit.setText("")
+        dlg._on_save()
+        candidate = dlg.candidate()
+        assert candidate is not None
+        assert candidate.expected_description == ""
+
+    def test_edit_preserves_stable_item_id(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        existing = _item("keep-id")
+        dlg = ItemEditorDialog(existing=existing)
+        dlg._name_edit.setText("Renamed")
+        dlg._on_save()
+        candidate = dlg.candidate()
+        assert candidate is not None
+        assert candidate.item_id == "keep-id"
+        assert candidate.name == "Renamed"
+
+
+class TestAliasMetadataPreservation:
+    """R5.4 — _build_aliases must preserve alias_id AND notes for unchanged
+    text; only genuinely new alias texts get a fresh identity."""
+
+    def test_unchanged_alias_preserves_id_and_notes(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        item = _with_alias(_item("a"), text="alt", notes="keep-me")
+        dlg = ItemEditorDialog(existing=item)
+        result = dlg._build_aliases(["alt"])
+        assert len(result) == 1
+        assert result[0].alias_id == item.aliases[0].alias_id
+        assert result[0].text == "alt"
+        assert result[0].notes == "keep-me"
+
+    def test_new_alias_gets_fresh_id_and_empty_notes(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=_item("a"))  # no existing aliases
+        result = dlg._build_aliases(["brand-new"])
+        assert len(result) == 1
+        assert result[0].text == "brand-new"
+        assert result[0].notes == ""
+
+    def test_removed_alias_is_absent(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        item = _with_alias(_item("a"), text="gone", notes="x")
+        dlg = ItemEditorDialog(existing=item)
+        assert dlg._build_aliases([]) == ()
+
+    def test_edit_unrelated_field_preserves_all_alias_metadata(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        item = _with_alias(_item("a"), text="keep-me", notes="note-A")
+        dlg = ItemEditorDialog(existing=item)
+        # Re-read the alias rows exactly the way _on_save does after editing
+        # only category/name — the alias metadata must come through intact.
+        raw = [
+            line.strip() for line in dlg._aliases_edit.toPlainText().splitlines() if line.strip()
+        ]
+        new_aliases = dlg._build_aliases(raw)
+        assert new_aliases[0].alias_id == item.aliases[0].alias_id
+        assert new_aliases[0].text == item.aliases[0].text
+        assert new_aliases[0].notes == item.aliases[0].notes
+
+    def test_two_unchanged_aliases_both_preserved(self, qapp) -> None:
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        a1 = CheckItemAlias(alias_id="alias-1", text="alt-a", notes="note-a")
+        a2 = CheckItemAlias(alias_id="alias-2", text="alt-b", notes="note-b")
+        item = CheckItem(
+            item_id="i1",
+            code="C",
+            name="N",
+            detection_phrase="功能A",
+            aliases=(a1, a2),
+        )
+        dlg = ItemEditorDialog(existing=item)
+        result = dlg._build_aliases(["alt-a", "alt-b"])
+        assert result[0].alias_id == "alias-1"
+        assert result[0].notes == "note-a"
+        assert result[1].alias_id == "alias-2"
+        assert result[1].notes == "note-b"
+
+
+class TestManageButtonEnablement:
+    """检查项管理 availability derives from the UI lifecycle state."""
+
+    def test_enabled_when_idle(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        window._update_actions()
+        assert window._manage_button.isEnabled() is True
+        window.close()
+
+    def test_disabled_during_importing(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        window._state = UiState.IMPORTING
+        window._update_actions()
+        assert window._manage_button.isEnabled() is False
+        window.close()
+
+    def test_disabled_during_verifying(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        window._state = UiState.VERIFYING
+        window._update_actions()
+        assert window._manage_button.isEnabled() is False
+        window.close()
+
+
+class TestManageDialogWiring:
+    """_on_manage_clicked opens the real dialog wired to the real save
+    handler and the current snapshot (function-local imports, so the patch
+    targets the defining module)."""
+
+    def test_manage_opens_dialog_with_handler_and_current_items(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        dialog = MagicMock()
+        dialog.exec.return_value = QDialog.DialogCode.Rejected  # close, no save
+        with patch(
+            "design_requirement_checker.ui.checklist_dialog.ChecklistDialog",
+            return_value=dialog,
+        ) as mock_dialog:
+            window._on_manage_clicked()
+
+        args, kwargs = mock_dialog.call_args
+        assert args[0] == (_item("a"),)
+        assert kwargs["save_handler"] == window._save_baseline_snapshot
+        assert kwargs["parent"] is window
+        dialog.exec.assert_called_once()
+        assert window._check_items == (_item("a"),)  # reject never publishes
+        window.close()
+
+
+class TestBaselineChangeInvalidatesStaleVerification:
+    """A baseline change bumps the operation generation: results are cleared
+    and a verification from the old generation can never become current."""
+
+    def test_set_check_items_clears_results_and_bumps_gen(self, qapp) -> None:
+        from design_requirement_checker.matching import verify
+
+        window = MainWindow(check_items=(_item("a"),))
+        document = _document(_block("body:p0", "功能A"))
+        window.set_document(document)
+        gen0 = window.start_verification()
+        results = verify(document, (_item("a"),))
+        window.complete_verification(gen0, results)
+        assert len(window.results) == 1
+        old_gen = window._op_generation
+
+        window.set_check_items((_item("a"), _item("b", phrase="功能B")), baseline_id="new-bid")
+        assert window.results == ()
+        assert window._op_generation > old_gen
+        assert window._baseline_id == "new-bid"
+        window.close()
+
+    def test_stale_verification_discarded_after_baseline_change(self, qapp) -> None:
+        from design_requirement_checker.matching import verify
+
+        window = MainWindow(check_items=(_item("a"),))
+        document = _document(_block("body:p0", "功能A"))
+        window.set_document(document)
+        gen0 = window.start_verification()
+        # Baseline changes mid-run — the in-flight outcome is now stale.
+        window.set_check_items((_item("a"), _item("b", phrase="功能B")))
+        results = verify(document, (_item("a"),))
+        applied = window.complete_verification(gen0, results)
+        assert applied is False
+        assert window.results == ()
+        window.close()
