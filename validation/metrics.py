@@ -4,8 +4,8 @@ Metric math is separated from report rendering and from the evaluation
 harness. Every metric carries an explicit numerator and denominator; a
 zero-denominator metric is ``N/A`` — never a misleading 100%.
 
-Binary presence interpretation (documented against docs/domain-model.md and
-docs/product-spec.md before implementation):
+Binary presence interpretation (documented against docs/spec.md §5 and
+docs/constitution.md §5 before implementation):
 
 - ground-truth POSITIVE: expectedStatus CONFIGURED or STRUCK_OUT — the
   document evidence says the function's text is present (active or struck);
@@ -16,10 +16,9 @@ docs/product-spec.md before implementation):
   so it is excluded from the 2x2 table and reported separately
   (unresolved rate, expected-unresolved count).
 
-This matches the product acceptance rule (product-spec.md §Production MVP
-acceptance 8 and the fixture-set paragraph): report precision/recall, false
-positives/negatives, strike accuracy, and the unresolved rate *separately*,
-with denominators.
+This matches the product acceptance rule (docs/spec.md §15 acceptance 6 and
+§13): report precision/recall, false positives/negatives, strike accuracy,
+and the unresolved rate *separately*, with denominators.
 """
 
 from __future__ import annotations

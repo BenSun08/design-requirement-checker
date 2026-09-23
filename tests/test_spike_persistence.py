@@ -1,9 +1,9 @@
 """Spike tests: JSON vs SQLite persistence for one local CheckItem baseline.
 
-All tests are hand-labelled expected outcomes written BEFORE the spike probe
-helpers were implemented in ``persistence_probe.py``. They exercise exactly
-the bounded scenarios the implementation-plan's persistence-validation section
-requires.
+All tests are hand-labelled expected outcomes written before the spike probe
+helpers were implemented in ``persistence_probe.py``. They exercise
+the bounded scenarios required for the persistence decision (recorded in
+docs/plan.md §4).
 
 This file is **not production code** — it must remain isolated under
 ``tests/`` and does not modify ``src/baseline_store.py`` or any other production

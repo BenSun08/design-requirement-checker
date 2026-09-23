@@ -10,7 +10,7 @@ decision evidence for the strategy "python-docx + focused OOXML/XML access":
   geometry, tracked-revision markup, orphan style references and excluded
   structures (content controls, text boxes, headers/footers).
 
-Conservative rules enforced here (product-spec policy):
+Conservative rules enforced here (docs/spec.md §7 policy):
 - effective strike is resolved from run rPr -> character style chain ->
   paragraph style chain -> docDefaults -> default off;
 - anything unresolvable (invalid values, orphan references, broken chains,
@@ -20,7 +20,7 @@ Conservative rules enforced here (product-spec policy):
   content produce explicit LIMITED reasons instead of silent loss.
 
 Offsets are Python code-point indices with half-open [start, end) ranges,
-matching the domain-model invariant (Python ``str`` counts code points).
+matching the domain invariant (docs/spec.md §5; Python ``str`` counts code points).
 """
 
 from dataclasses import dataclass

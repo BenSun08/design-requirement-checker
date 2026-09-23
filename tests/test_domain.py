@@ -1,4 +1,4 @@
-"""Domain value-model invariants (docs/domain-model.md).
+"""Domain value-model invariants (docs/spec.md §5).
 
 Expected behavior is written by hand from the domain model document, not from
 implementation output: half-open code-point offsets, contiguous runs, unknown

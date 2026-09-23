@@ -1,11 +1,11 @@
 """One local baseline's load, save and recovery.
 
 Production JSON persistence following the validated contract from
-docs/technical-spikes.md (persistence validation spike). This module owns
-serialization, strict deserialize validation, the two-temp-file atomic-save
-algorithm, and backup recovery. It has no Qt imports (``default_path`` does a
-lazy QStandardPaths lookup at call time with a safe fallback for non-Qt
-contexts) and no imports from ``tests/``.
+docs/constitution.md §9 (persistence decision recorded in docs/plan.md §4).
+This module owns serialization, strict deserialize validation, the
+two-temp-file atomic-save algorithm, and backup recovery. It has no Qt
+imports (``default_path`` does a lazy QStandardPaths lookup at call time
+with a safe fallback for non-Qt contexts) and no imports from ``tests/``.
 """
 
 from __future__ import annotations

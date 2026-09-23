@@ -2,7 +2,7 @@
 
 All tests are hand-labelled expected outcomes written before the production
 module was implemented. They exercise the validated persistence contract from
-docs/technical-spikes.md. No test imports from ``tests/persistence_probe.py`` —
+docs/constitution.md §9. No test imports from ``tests/persistence_probe.py`` —
 production behavior is tested independently.
 """
 

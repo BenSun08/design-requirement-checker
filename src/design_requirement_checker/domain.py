@@ -1,4 +1,4 @@
-"""UI-independent domain value models and invariants (docs/domain-model.md).
+"""UI-independent domain value models and invariants (docs/spec.md §5).
 
 This module owns document-snapshot values for the ingestion slice: blocks,
 runs with effective strike, stable locations and honest coverage. It must
@@ -13,7 +13,7 @@ from typing import Literal
 Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
-#: Bump it whenever the verified rule behavior changes (docs/domain-model.md).
+#: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
 RULE_REVISION = "task3-v1"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
@@ -148,7 +148,7 @@ class DocumentBlock:
 
 @dataclass(frozen=True)
 class Document:
-    """An immutable input snapshot with honest coverage (docs/domain-model.md).
+    """An immutable input snapshot with honest coverage (docs/spec.md §5).
 
     ``coverage`` is COMPLETE only when nothing in the declared scope was
     excluded; otherwise LIMITED with at least one warning. Warnings are

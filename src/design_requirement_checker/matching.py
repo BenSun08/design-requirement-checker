@@ -1,7 +1,7 @@
 """Pure deterministic verification: detection, evidence and classification.
 
-Implements the Task 3 contract validated by the merged S6 spike
-(docs/technical-spikes.md, "Executed evidence — S6"): the exact normalization
+Implements the Task 3 contract (docs/constitution.md §7, validated by the
+executed S6 spike — see docs/plan.md §4): the exact normalization
 allowlist (N1/N2/N3) with raw-offset traceability, configured-phrase/alias
 detection, forward-only requirement-span association, strike coverage over the
 requirement span, the confirmed resolution truth table and the independent
