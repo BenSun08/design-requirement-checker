@@ -14,6 +14,7 @@ Task 4 subtasks; the state transitions here are the foundation they build on.
 
 from __future__ import annotations
 
+import difflib
 import html
 import threading
 from collections.abc import Callable, Sequence
@@ -203,6 +204,33 @@ def _format_block_with_highlight(
             piece = f"<mark>{piece}</mark>"
         rendered += piece
     return rendered or "（空段落）"
+
+
+def _description_diff_html(expected: str, actual: str) -> str:
+    """Presentation-only character-level diff of expected vs actual description.
+
+    Explanation aid for ``ComparisonState.DIFFERENT`` results. It never
+    changes comparison semantics — matching already decided DIFFERENT; this
+    only shows where the two texts differ. Common text stays plain, text only
+    in the expected description is struck through, text only in the actual
+    description is highlighted. Uses stdlib ``difflib`` over raw characters
+    (Chinese text has no spaces to split on) without any extra normalization
+    beyond what matching itself applied.
+    """
+    matcher = difflib.SequenceMatcher(a=expected, b=actual, autojunk=False)
+    pieces: list[str] = []
+    for tag, a_start, a_end, b_start, b_end in matcher.get_opcodes():
+        if tag == "equal":
+            pieces.append(html.escape(expected[a_start:a_end]))
+            continue
+        if tag in ("delete", "replace"):
+            pieces.append(
+                '<span style="color: #842029; text-decoration: line-through">'
+                f"{html.escape(expected[a_start:a_end])}</span>"
+            )
+        if tag in ("insert", "replace"):
+            pieces.append(f"<mark>{html.escape(actual[b_start:b_end])}</mark>")
+    return "".join(pieces)
 
 
 def format_blocks_html(document: Document) -> str:
@@ -692,7 +720,18 @@ class MainWindow(QMainWindow):
         ]
         if result.status is CheckStatus.MISSING:
             parts.append("<p>在已检查范围内未找到匹配证据</p>")
-        if actual_text:
+        if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
+            # DIFFERENT results must explain themselves: the raw readable
+            # actual text plus a where-do-they-differ rendering. The raw
+            # requirement slice is the source text — never the normalized
+            # comparison form (presentation only; matching is unchanged).
+            req_start, req_end = selected.requirement_span
+            actual_raw = selected.raw_text[req_start:req_end]
+            parts.append(f"<p>实际描述：{html.escape(actual_raw)}</p>")
+            parts.append(
+                f"<p>差异详情：{_description_diff_html(item.expected_description, actual_raw)}</p>"
+            )
+        elif actual_text:
             if result.status is CheckStatus.STRUCK_OUT:
                 parts.append(f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>")
             else:

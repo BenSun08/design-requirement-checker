@@ -38,6 +38,7 @@ from design_requirement_checker.domain import (
 from design_requirement_checker.ui.main_window import (
     MainWindow,
     UiState,
+    _description_diff_html,
     format_blocks_html,
     format_location,
 )
@@ -1123,6 +1124,36 @@ class TestFiltersAndSearch:
         window.close()
 
 
+class TestDescriptionDiff:
+    """Presentation-only diff rendering for 描述有差异 results."""
+
+    def test_common_text_stays_plain_and_differences_are_marked(self) -> None:
+        expected = "2门控制增加开关门延时2s功能"
+        actual = "2门控制增加开关门延时3s功能"
+        diff = _description_diff_html(expected, actual)
+        # Common prefix renders as plain text.
+        assert "2门控制增加开关门延时" in diff
+        # Character-level: only the differing digit is struck/marked; the
+        # shared unit "s" stays plain — the swap is visible in place.
+        assert 'text-decoration: line-through">2<' in diff
+        assert "<mark>3</mark>" in diff
+        assert "s功能" in diff
+
+    def test_identical_texts_render_without_marks(self) -> None:
+        diff = _description_diff_html("延时3s输出", "延时3s输出")
+        assert "<mark>" not in diff
+        assert "line-through" not in diff
+        assert "延时3s输出" in diff
+
+    def test_insertions_and_deletions_are_both_shown(self) -> None:
+        diff = _description_diff_html("车门打开时点亮", "车门打开时室内灯点亮")
+        assert "<mark>室内灯</mark>" in diff
+
+    def test_html_special_characters_are_escaped(self) -> None:
+        assert 'line-through">&lt;b&gt;</span>' in _description_diff_html("<b>", "")
+        assert "<mark>&lt;i&gt;</mark>" in _description_diff_html("", "<i>")
+
+
 class TestResultDetail:
     def test_detail_shows_code_name_category(self, qapp) -> None:
         item = CheckItem(
@@ -1253,6 +1284,40 @@ class TestResultDetail:
         text = window._detail_view.toPlainText()
         assert "2门控制增加开关门延时2s功能" in text
         assert "2门控制增加开关门延时3s功能" in text
+        window.close()
+
+    def test_different_result_shows_expected_actual_and_diff(self, qapp) -> None:
+        # 描述有差异 must explain itself: expected description, the raw
+        # readable actual text, and a where-do-they-differ rendering.
+        item = CheckItem(
+            item_id="a",
+            code="A",
+            name="n",
+            detection_phrase="x",
+            expected_description="2门控制增加开关门延时2s功能",
+        )
+        ev = _evidence(requirement_text="2门控制增加开关门延时3s功能")
+        result = CheckResult(
+            check_item=item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev,),
+            comparison_state=ComparisonState.DIFFERENT,
+            comparison_reason="",
+            review_reasons=(),
+            rule_revision="r1",
+            primary_evidence_id="e1",
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "期望描述：2门控制增加开关门延时2s功能" in text
+        assert "实际描述：2门控制增加开关门延时3s功能" in text
+        # The 差异详情 line carries the difference in place: only the
+        # differing digit is struck/marked, the shared unit stays plain.
+        # (Markup formatting itself is asserted by TestDescriptionDiff.)
+        assert "差异详情：2门控制增加开关门延时23s功能" in text
         window.close()
 
     def test_match_method_label(self, qapp) -> None:
