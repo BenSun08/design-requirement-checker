@@ -1788,7 +1788,10 @@ class TestPureFormatting:
         # never merged across paragraph or cell boundaries.
         document = import_document(fixtures.build_table_long_cell(tmp_path / "long-cell.docx"))
         blocks_html = format_blocks_html(document)
-        long_text = "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        long_text = (
+            "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；"
+            "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        )
         second_para = "输出具有短路保护功能，短路解除后自动恢复。"
         # One grouped header for the description cell (no repeated 段 header).
         assert blocks_html.count("表1 · 行1 · 单元格2") == 1
@@ -1810,7 +1813,10 @@ class TestPureFormatting:
         window = MainWindow()
         window.show_import_outcome(document)
         plain = window._detail_view.toPlainText()
-        long_text = "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        long_text = (
+            "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；"
+            "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        )
         second_para = "输出具有短路保护功能，短路解除后自动恢复。"
         assert long_text in plain
         assert second_para in plain

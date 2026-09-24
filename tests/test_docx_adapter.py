@@ -281,9 +281,7 @@ class TestTableContentControls:
             "t0r1c0:table-cell:p0",
         ]
 
-    def test_sdt_wrapped_cell_and_row_raise_explicit_warning(
-        self, table_content_controls
-    ) -> None:
+    def test_sdt_wrapped_cell_and_row_raise_explicit_warning(self, table_content_controls) -> None:
         document = read_document(table_content_controls)
         all_text = "\n".join(block.text for block in document.blocks)
         # The sdt-wrapped cell (row 2, col 2) and the sdt-wrapped whole row
