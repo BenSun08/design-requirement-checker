@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSplitter,
+    QStackedWidget,
+    QTabBar,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -59,6 +61,7 @@ from design_requirement_checker.domain import (
     TextRun,
 )
 from design_requirement_checker.ui import style
+from design_requirement_checker.ui.checklist_page import ChecklistPage
 from design_requirement_checker.ui.workers import ImportWorker, VerificationWorker
 
 if TYPE_CHECKING:
@@ -336,20 +339,130 @@ class MainWindow(QMainWindow):
         self._op_generation: int = 0
 
         central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
-        title = QLabel("设计需求核查工具")
-        font = title.font()
-        font.setPointSize(20)
-        font.setBold(True)
-        title.setFont(font)
-        layout.addWidget(title)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(self._build_header())
+        root.addWidget(self._build_nav())
+
+        # --- pages: workspace (文档核查) and management (检查项管理) ---
+        self._pages = QStackedWidget()
+        self._pages.addWidget(self._build_workspace_page())
+        self._management_page = ChecklistPage(
+            self._check_items, save_handler=self._save_baseline_snapshot
+        )
+        # Leaving the management section never saves; a fully persisted save
+        # is announced via `saved` (publishing already happened in the
+        # handler, which ran validation + persistence before returning).
+        self._management_page.close_requested.connect(self._on_management_close)
+        self._management_page.saved.connect(self._on_management_saved)
+        self._pages.addWidget(self._management_page)
+        #: Identity of the baseline snapshot the management page last loaded.
+        #: A different object (set_check_items installs a new tuple) means
+        #: the page's working copy must be re-synced on next activation;
+        #: identical object means unsaved candidates survive tab switches.
+        self._management_source: tuple[CheckItem, ...] | None = self._check_items
+        root.addWidget(self._pages, 1)
+        self._nav_tabs.currentChanged.connect(self._on_nav_changed)
+
+        self.setCentralWidget(central)
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._search_shortcut.activated.connect(self._search_input.setFocus)
+        if self._check_items:
+            self.statusBar().showMessage(f"已加载 {len(self._check_items)} 项检查基准")
+        else:
+            self.statusBar().showMessage("尚未加载检查基准 — 点击检查项管理以配置")
+        self._thread: QThread | None = None
+        self._worker: ImportWorker | VerificationWorker | None = None
+        self._active_threads: list[QThread] = []
+        #: Thread owned by each operation generation, so a stale completion can
+        #: still quit exactly its own thread without touching current refs.
+        self._thread_for_generation: dict[int, QThread] = {}
+        self._cancel_event: threading.Event | None = None
+        self._close_requested = False
+        self._detail_result: CheckResult | None = None
+        self._evidence_index: int = 0
+        self._update_actions()
+
+    # --- shell: header, navigation, pages (prototype parity) ----------------
+
+    def _build_header(self) -> QWidget:
+        """Prototype header: DR mark, product name, domain subtitle.
+
+        The prototype's 交互原型/模拟数据 badge is deliberately absent —
+        production reads real documents and verifies real requirements.
+        """
+        header = QWidget()
+        header.setObjectName("appHeader")
+        header.setStyleSheet(f"background: {style.CARD}; border-bottom: 1px solid {style.BORDER};")
+        row = QHBoxLayout(header)
+        row.setContentsMargins(24, 12, 24, 12)
+        row.setSpacing(style.SPACING_CARD)
+        mark = QLabel("DR")
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet(
+            f"background: {style.PRIMARY}; color: {style.CARD};"
+            " font-weight: 700; border-radius: 4px; padding: 10px 8px;"
+        )
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        title = QLabel("Design Requirement Checker")
+        title_font = title.font()
+        title_font.setBold(True)
+        title_font.setPointSizeF(13.5)
+        title.setFont(title_font)
+        subtitle = QLabel("设计开发要求核查 · 驱动模块")
+        subtitle.setStyleSheet(f"color: {style.MUTED};")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        row.addWidget(mark)
+        row.addLayout(titles)
+        row.addStretch()
+        local_badge = QLabel("本地")
+        local_badge.setStyleSheet(
+            f"color: {style.MUTED}; border: 1px solid {style.BORDER};"
+            f"background: {style.PANEL_HEADING}; border-radius: 3px; padding: 6px 9px;"
+        )
+        row.addWidget(local_badge)
+        return header
+
+    def _build_nav(self) -> QWidget:
+        """Prototype nav: 文档核查 / 检查项管理 (N) + local-run note."""
+        nav = QWidget()
+        nav.setObjectName("appNav")
+        nav.setStyleSheet(f"background: {style.CARD}; border-bottom: 1px solid {style.BORDER};")
+        row = QHBoxLayout(nav)
+        row.setContentsMargins(16, 0, 24, 0)
+        row.setSpacing(0)
+        self._nav_tabs = QTabBar()
+        self._nav_tabs.setExpanding(False)
+        self._nav_tabs.setDrawBase(False)
+        self._nav_tabs.addTab("文档核查")
+        self._nav_tabs.addTab(self._management_tab_text())
+        row.addWidget(self._nav_tabs)
+        row.addStretch()
+        note = QLabel("本地运行 · 不上传文件")
+        note.setStyleSheet(f"color: {style.MUTED};")
+        row.addWidget(note)
+        return nav
+
+    def _management_tab_text(self) -> str:
+        """Nav label with the current baseline size (all items counted)."""
+        return f"检查项管理 ({len(self._check_items)})"
+
+    def _build_workspace_page(self) -> QWidget:
+        """The 文档核查 page: notices, actions, summary, filters, splitter."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 16, 24, 16)
+        layout.setSpacing(12)
 
         notice = QLabel(
-            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。点击 “检查项管理” 可编辑基准内容。"
+            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。"
+            "切换到 “检查项管理” 可编辑基准内容。"
         )
         notice.setWordWrap(True)
+        notice.setStyleSheet(f"color: {style.MUTED};")
         layout.addWidget(notice)
 
         actions = QHBoxLayout()
@@ -358,15 +471,13 @@ class MainWindow(QMainWindow):
         actions.addWidget(self._import_button)
         self._run_button = QPushButton("开始核查")
         self._run_button.setEnabled(False)
+        style.mark_primary(self._run_button)
         self._run_button.clicked.connect(self._on_run_clicked)
         actions.addWidget(self._run_button)
         self._cancel_button = QPushButton("取消核查")
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
         actions.addWidget(self._cancel_button)
-        self._manage_button = QPushButton("检查项管理")
-        self._manage_button.clicked.connect(self._on_manage_clicked)
-        actions.addWidget(self._manage_button)
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)  # indeterminate
         self._progress.setVisible(False)
@@ -423,25 +534,38 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 3)
         layout.addWidget(self._splitter, 1)
         self._result_list.currentItemChanged.connect(self._on_result_selected)
+        return page
 
-        self.setCentralWidget(central)
-        self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        self._search_shortcut.activated.connect(self._search_input.setFocus)
-        if self._check_items:
-            self.statusBar().showMessage(f"已加载 {len(self._check_items)} 项检查基准")
-        else:
-            self.statusBar().showMessage("尚未加载检查基准 — 点击检查项管理以配置")
-        self._thread: QThread | None = None
-        self._worker: ImportWorker | VerificationWorker | None = None
-        self._active_threads: list[QThread] = []
-        #: Thread owned by each operation generation, so a stale completion can
-        #: still quit exactly its own thread without touching current refs.
-        self._thread_for_generation: dict[int, QThread] = {}
-        self._cancel_event: threading.Event | None = None
-        self._close_requested = False
-        self._detail_result: CheckResult | None = None
-        self._evidence_index: int = 0
-        self._update_actions()
+    # --- navigation (prototype: tabs, not a modal utility) -----------------
+
+    def _on_nav_changed(self, index: int) -> None:
+        self._pages.setCurrentIndex(index)
+        if index == 1:
+            self._sync_management_page()
+
+    def _sync_management_page(self) -> None:
+        """Re-sync the management working copy only when the baseline moved.
+
+        ``set_check_items`` installs a new immutable tuple, so identity is the
+        cheap dirty check: same object → the page may hold unsaved candidates
+        that survive tab switches; different object → the working copy is
+        stale and must be rebuilt from the current snapshot.
+        """
+        if self._management_source is not self._check_items:
+            self._management_page.load_items(self._check_items)
+            self._management_source = self._check_items
+
+    def _on_management_close(self) -> None:
+        """返回文档核查 — leaving the section never publishes anything."""
+        self._nav_tabs.setCurrentIndex(0)
+
+    def _on_management_saved(self) -> None:
+        """A save fully succeeded (handler already published + persisted).
+
+        Mark the page as synced with the just-installed snapshot so the next
+        activation keeps it instead of rebuilding the identical tuple.
+        """
+        self._management_source = self._check_items
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Never accept close while any owned QThread is still running.
@@ -834,8 +958,9 @@ class MainWindow(QMainWindow):
         self._run_button.setEnabled(can_run and s in runnable_states)
         # Cancel only applies to verification; import has no cooperative cancel.
         self._cancel_button.setEnabled(s is UiState.VERIFYING)
-        # Manage baseline is allowed whenever no background work is running.
-        self._manage_button.setEnabled(idle_for_ui)
+        # The management section is available whenever no background work is
+        # running (same rule the former modal entry button carried).
+        self._nav_tabs.setTabEnabled(1, idle_for_ui)
 
     # --- background import --------------------------------------------------
 
@@ -977,25 +1102,19 @@ class MainWindow(QMainWindow):
             self._cancel_event.set()
 
     def _on_manage_clicked(self) -> None:
-        """Open the checklist management workspace.
+        """Activate the checklist management section (nav tab).
 
-        The dialog keeps its candidate working copy and stays open until a
-        save fully succeeds: it calls back into :meth:`_save_baseline_snapshot`
-        on 保存基准 and only closes when that returns True. Validation
-        errors, declined warnings, persistence failures and declined
-        destructive-recovery confirmations all leave the dialog open with
-        the candidate intact — a failed save never silently discards edits.
-        The current baseline and results are mutated only after persistence
-        succeeds.
+        The embedded page keeps its candidate working copy across tab
+        switches; it calls into :meth:`_save_baseline_snapshot` on 保存基准
+        and publishes only through that handler. Validation errors, declined
+        warnings, persistence failures and declined destructive-recovery
+        confirmations all leave the candidate intact — a failed save never
+        silently discards edits. The current baseline and results are mutated
+        only after persistence succeeds. Leaving the section (返回文档核查)
+        never saves.
         """
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
-
-        dialog = ChecklistDialog(
-            self._check_items,
-            parent=self,
-            save_handler=self._save_baseline_snapshot,
-        )
-        dialog.exec()
+        self._sync_management_page()
+        self._nav_tabs.setCurrentIndex(1)
 
     def _save_baseline_snapshot(self, new_items: tuple[CheckItem, ...]) -> bool:
         """Validate → confirm → persist → publish one candidate snapshot.
@@ -1113,6 +1232,7 @@ class MainWindow(QMainWindow):
         self._check_items = items
         if baseline_id:
             self._baseline_id = baseline_id
+        self._nav_tabs.setTabText(1, self._management_tab_text())
         self._results = ()
         self._result_list.clear()
         self._detail_view.clear()

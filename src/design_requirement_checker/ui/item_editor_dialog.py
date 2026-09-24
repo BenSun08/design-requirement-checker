@@ -1,6 +1,6 @@
 """Single CheckItem editor dialog (Task 5, T5.5).
 
-Used by ChecklistDialog for both Add and Edit flows. Preserves stable
+Used by ChecklistPage for both Add and Edit flows. Preserves stable
 item_id on edit (UUID generated only for truly new items). Alias IDs
 survive edit when their text content remains unchanged — new/changed
 aliases get a fresh UUID. Validation errors block save; per-field

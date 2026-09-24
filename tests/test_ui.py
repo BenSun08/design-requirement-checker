@@ -170,7 +170,22 @@ def _result_with_evidence(
 
 
 class TestEnabledActions:
-    _FILTERS = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"}
+    _FILTERS = {
+        "全部",
+        "已配置",
+        "未配置",
+        "已划除",
+        "待人工核查",
+        "仅异常",
+        # Management-page buttons live in the always-available checklist
+        # section (its own enablement rules are covered separately).
+        "新增检查项",
+        "编辑",
+        "切换启用/禁用",
+        "删除",
+        "保存基准",
+        "返回文档核查",
+    }
 
     def test_only_implemented_actions_are_enabled(self, qapp) -> None:
         window = MainWindow()
@@ -180,7 +195,7 @@ class TestEnabledActions:
             b.text() for b in buttons if not b.isEnabled() and b.text() not in self._FILTERS
         ]
         window.close()
-        assert sorted(enabled) == ["导入 DOCX", "检查项管理"]
+        assert sorted(enabled) == ["导入 DOCX"]
         assert "开始核查" in disabled
         assert "取消核查" in disabled
 
@@ -942,7 +957,10 @@ class TestReviewWorkspaceShell:
         assert window._import_button.text() == "导入 DOCX"
         assert window._run_button.text() == "开始核查"
         assert window._cancel_button.text() == "取消核查"
-        assert window._manage_button.text() == "检查项管理"
+        # Navigation is now a primary section structure (prototype parity).
+        assert window._nav_tabs.count() == 2
+        assert window._nav_tabs.tabText(0) == "文档核查"
+        assert "检查项管理" in window._nav_tabs.tabText(1)
         window.close()
 
     def test_document_still_renders_after_import(self, qapp, tmp_path) -> None:
@@ -1949,3 +1967,35 @@ class TestVisualFoundation:
         # Visual marking never toggles enablement or text.
         assert button.isEnabled() is True
         assert button.text() == "保存"
+
+
+class TestNavigationShell:
+    """T2: 文档核查 / 检查项管理 tabs switch reliably and safely."""
+
+    def test_tabs_switch_between_workspace_and_management(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert window._pages.currentIndex() == 0
+        window._on_manage_clicked()
+        assert window._nav_tabs.currentIndex() == 1
+        assert window._pages.currentIndex() == 1
+        window._nav_tabs.setCurrentIndex(0)
+        assert window._pages.currentIndex() == 0
+        window.close()
+
+    def test_management_tab_disabled_during_background_work(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert window._nav_tabs.isTabEnabled(1) is True
+        window._state = UiState.IMPORTING
+        window._update_actions()
+        assert window._nav_tabs.isTabEnabled(1) is False
+        window._state = UiState.VERIFYING
+        window._update_actions()
+        assert window._nav_tabs.isTabEnabled(1) is False
+        window.close()
+
+    def test_tab_count_reflects_baseline_size(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert "(1)" in window._nav_tabs.tabText(1)
+        window.set_check_items((_item("a"), _item("b", phrase="功能B")), baseline_id="bid")
+        assert "(2)" in window._nav_tabs.tabText(1)
+        window.close()

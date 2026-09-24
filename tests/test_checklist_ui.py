@@ -38,7 +38,7 @@ def _item(item_id: str = "a", phrase: str = "功能A") -> CheckItem:
     )
 
 
-def _save_via_dialog(
+def _save_via_page(
     window: MainWindow,
     candidate_items: tuple[CheckItem, ...],
     tmp_path,
@@ -46,28 +46,28 @@ def _save_via_dialog(
     save_side_effect: Exception | None = None,
     mock_save: bool = True,
 ):
-    """Open the real ChecklistDialog wired to the window save handler and
-    press 保存基准 once.
+    """Open a real ChecklistPage wired to the window save handler and press
+    保存基准 once.
 
     Persistence is redirected to ``tmp_path``. By default
     ``application.save_baseline_to`` is mocked (``save_side_effect`` injects
     a failure); with ``mock_save=False`` the real application+store stack
     runs against ``tmp_path`` so the persisted file itself can be asserted.
-    Returns ``(dialog, save_mock, accepted)`` where ``save_mock`` is None
-    when the real stack was used and ``accepted`` records whether the
-    dialog closed via accept().
+    Returns ``(page, save_mock, accepted)`` where ``save_mock`` is None
+    when the real stack was used and ``accepted`` records whether the save
+    fully succeeded (the page emitted ``saved``).
     """
-    from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+    from design_requirement_checker.ui.checklist_page import ChecklistPage
 
     def _run() -> tuple[object, list[bool]]:
-        dialog = ChecklistDialog(
+        dialog = ChecklistPage(
             window._check_items,
             parent=window,
             save_handler=window._save_baseline_snapshot,
         )
         dialog._items = list(candidate_items)
         accepted: list[bool] = []
-        dialog.accepted.connect(lambda: accepted.append(True))
+        dialog.saved.connect(lambda: accepted.append(True))
         dialog._on_save_requested()
         return dialog, accepted
 
@@ -121,7 +121,7 @@ class TestStartupLoadStates:
         # Normal baseline-management behavior remains available: a save from
         # this state needs no destructive confirmation and succeeds.
         with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
-            _dialog, mock_save, accepted = _save_via_dialog(
+            _dialog, mock_save, accepted = _save_via_page(
                 window, (_item("a"), _item("b", phrase="功能B")), tmp_path
             )
         mock_question.assert_not_called()
@@ -138,7 +138,7 @@ class TestStartupLoadStates:
 
         new_items = (_item("a"),)
         with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
-            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_page(window, new_items, tmp_path)
 
         mock_question.assert_not_called()  # no destructive confirmation
         mock_save.assert_called_once()
@@ -154,7 +154,7 @@ class TestStartupLoadStates:
         assert "已从备份基准恢复" in window._baseline_banner.text()
 
         new_items = (_item("a"),)
-        _dialog, _mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
+        _dialog, _mock_save, accepted = _save_via_page(window, new_items, tmp_path)
 
         # Successful save installs a new primary: recovery banner cleared.
         assert accepted == [True]
@@ -172,7 +172,7 @@ class TestStartupLoadStates:
 
         new_items = (_item("a"),)
         with patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical:
-            _dialog, mock_save, accepted = _save_via_dialog(
+            _dialog, mock_save, accepted = _save_via_page(
                 window,
                 new_items,
                 tmp_path,
@@ -184,7 +184,7 @@ class TestStartupLoadStates:
         # QMessageBox.critical(parent, title, text) → title is args[1].
         titles = [call.args[1] for call in mock_critical.call_args_list]
         assert "基准版本不兼容" in titles
-        assert accepted == []  # dialog stays open
+        assert accepted == []  # page keeps the candidate
         # Nothing published; compatibility state and banner persist.
         assert window._check_items == ()
         assert window._baseline_load_state == "unsupported-schema"
@@ -202,7 +202,7 @@ class TestStartupLoadStates:
             "PySide6.QtWidgets.QMessageBox.question",
             return_value=QMessageBox.StandardButton.No,
         ) as mock_question:
-            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_page(window, new_items, tmp_path)
 
         mock_question.assert_called_once()  # destructive replacement is explicit
         prompt = mock_question.call_args.args[2]
@@ -223,7 +223,7 @@ class TestStartupLoadStates:
             "PySide6.QtWidgets.QMessageBox.question",
             return_value=QMessageBox.StandardButton.Yes,
         ) as mock_question:
-            _dialog, mock_save, accepted = _save_via_dialog(window, new_items, tmp_path)
+            _dialog, mock_save, accepted = _save_via_page(window, new_items, tmp_path)
 
         mock_question.assert_called_once()
         mock_save.assert_called_once()
@@ -237,7 +237,7 @@ class TestStartupLoadStates:
         window = MainWindow(check_items=(_item("a"),))
         assert window._baseline_load_state == "normal"
         with patch("PySide6.QtWidgets.QMessageBox.question") as mock_question:
-            _dialog, _mock_save, accepted = _save_via_dialog(
+            _dialog, _mock_save, accepted = _save_via_page(
                 window, (_item("a"), _item("b", phrase="功能B")), tmp_path
             )
         mock_question.assert_not_called()
@@ -247,26 +247,24 @@ class TestStartupLoadStates:
 
 
 class TestCandidatePreservation:
-    """R5.8 — failed validation/persistence keeps the dialog open with the
-    candidate intact; the current baseline and results never change."""
+    """R5.8 — failed validation/persistence keeps the candidate in the page
+    intact; the current baseline and results never change."""
 
-    def test_dialog_accepts_only_when_handler_succeeds(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+    def test_page_emits_saved_only_when_handler_succeeds(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
         accepted: list[bool] = []
 
-        dialog = ChecklistDialog((_item("a"),), save_handler=lambda _items: False)
-        dialog.accepted.connect(lambda: accepted.append(True))
+        dialog = ChecklistPage((_item("a"),), save_handler=lambda _items: False)
+        dialog.saved.connect(lambda: accepted.append(True))
         dialog._on_save_requested()
         assert accepted == []
-        assert dialog.result() != QDialog.DialogCode.Accepted
         assert len(dialog.current_items()) == 1  # candidate rows remain
 
-        dialog2 = ChecklistDialog((_item("a"),), save_handler=lambda _items: True)
-        dialog2.accepted.connect(lambda: accepted.append(True))
+        dialog2 = ChecklistPage((_item("a"),), save_handler=lambda _items: True)
+        dialog2.saved.connect(lambda: accepted.append(True))
         dialog2._on_save_requested()
         assert accepted == [True]
-        assert dialog2.result() == QDialog.DialogCode.Accepted
 
     def test_duplicate_code_blocks_save_and_candidate_remains(self, qapp, tmp_path) -> None:
         window = MainWindow(check_items=(_item("a"),))
@@ -280,15 +278,15 @@ class TestCandidatePreservation:
         candidate = (_item("a"), dup)
 
         with patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical:
-            _dialog, mock_save, accepted = _save_via_dialog(window, candidate, tmp_path)
+            _dialog, mock_save, accepted = _save_via_page(window, candidate, tmp_path)
 
         mock_save.assert_not_called()  # validation error blocks persistence
         mock_critical.assert_called_once()  # reason shown
-        assert accepted == []  # dialog stays open with candidate
+        assert accepted == []  # page keeps the candidate
         assert window._check_items == (_item("a"),)  # current baseline untouched
         window.close()
 
-    def test_warning_declined_keeps_candidate_and_dialog_open(self, qapp, tmp_path) -> None:
+    def test_warning_declined_keeps_candidate_unsaved(self, qapp, tmp_path) -> None:
         # Same detection phrase on both items → overlap warning (not error).
         window = MainWindow(check_items=(_item("a"),))
         candidate = (_item("a"), _item("b", phrase="功能A"))
@@ -300,7 +298,7 @@ class TestCandidatePreservation:
             ) as mock_warning,
             patch("design_requirement_checker.application.save_baseline_to") as mock_save,
         ):
-            _dialog, _unused, accepted = _save_via_dialog(window, candidate, tmp_path)
+            _dialog, _unused, accepted = _save_via_page(window, candidate, tmp_path)
 
         mock_warning.assert_called_once()
         mock_save.assert_not_called()
@@ -322,7 +320,7 @@ class TestCandidatePreservation:
 
         candidate = (_item("a"), _item("b", phrase="功能B"))
         with patch("PySide6.QtWidgets.QMessageBox.critical"):
-            _dialog, mock_save, accepted = _save_via_dialog(
+            _dialog, mock_save, accepted = _save_via_page(
                 window,
                 candidate,
                 tmp_path,
@@ -336,7 +334,7 @@ class TestCandidatePreservation:
         assert window._op_generation == gen_before  # no invalidation
         window.close()
 
-    def test_successful_save_publishes_and_closes_dialog(self, qapp, tmp_path) -> None:
+    def test_successful_save_publishes_and_emits_saved(self, qapp, tmp_path) -> None:
         from design_requirement_checker.matching import verify
 
         existing = (_item("a"),)
@@ -349,9 +347,7 @@ class TestCandidatePreservation:
 
         candidate = (_item("a"), _item("b", phrase="功能B"))
         # Real application+store stack against tmp_path: prove real persistence.
-        _dialog, save_mock, accepted = _save_via_dialog(
-            window, candidate, tmp_path, mock_save=False
-        )
+        _dialog, save_mock, accepted = _save_via_page(window, candidate, tmp_path, mock_save=False)
 
         assert save_mock is None
         assert accepted == [True]
@@ -483,31 +479,31 @@ def _with_alias(
 
 
 class TestChecklistWorkspace:
-    """Dialog-level working-copy behavior: rendering, add/edit wiring,
-    disable/re-enable and confirmed delete. The dialog only mutates its own
+    """Page-level working-copy behavior: rendering, add/edit wiring,
+    disable/re-enable and confirmed delete. The page only mutates its own
     working copy; save/publish behavior lives in the MainWindow flow tests."""
 
     def test_empty_baseline_renders_zero_rows(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog(())
+        dialog = ChecklistPage(())
         assert dialog._table.rowCount() == 0
         assert dialog._count_label.text() == "共 0 项"
         assert dialog.current_items() == ()
 
     def test_existing_rows_rendered(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"), _item("b")))
+        dialog = ChecklistPage((_item("a"), _item("b")))
         assert dialog._table.rowCount() == 2
         assert dialog._count_label.text() == "共 2 项"
         assert dialog._table.item(0, 0).text() == "A"  # code column
         assert dialog._table.item(0, 5).text() == "启用"
 
     def test_toggle_disable_and_reenable(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         dialog._table.selectRow(0)
         dialog._on_toggle_enabled()
         assert dialog.current_items()[0].enabled is False
@@ -517,9 +513,9 @@ class TestChecklistWorkspace:
         assert dialog._table.item(0, 5).text() == "启用"
 
     def test_delete_cancel_keeps_item(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         dialog._table.selectRow(0)
         with patch(
             "PySide6.QtWidgets.QMessageBox.question",
@@ -529,9 +525,9 @@ class TestChecklistWorkspace:
         assert len(dialog.current_items()) == 1
 
     def test_delete_confirm_removes_item(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         dialog._table.selectRow(0)
         with patch(
             "PySide6.QtWidgets.QMessageBox.question",
@@ -541,9 +537,9 @@ class TestChecklistWorkspace:
         assert dialog.current_items() == ()
 
     def test_add_item_appends_with_fresh_identity(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         fresh = CheckItem(
             item_id="new-id",
             code="B",
@@ -565,9 +561,9 @@ class TestChecklistWorkspace:
         assert dialog._table.rowCount() == 2
 
     def test_edit_selected_replaces_row_keeping_identity(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         edited = CheckItem(
             item_id="a",  # editor preserves the stable item_id
             code="A",
@@ -590,9 +586,9 @@ class TestChecklistWorkspace:
         assert dialog._table.rowCount() == 1  # replaced, not appended
 
     def test_edit_cancelled_keeps_row(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
-        dialog = ChecklistDialog((_item("a"),))
+        dialog = ChecklistPage((_item("a"),))
         editor = MagicMock()
         editor.exec.return_value = QDialog.DialogCode.Rejected
         dialog._table.selectRow(0)
@@ -604,13 +600,13 @@ class TestChecklistWorkspace:
         assert dialog.current_items() == (_item("a"),)
 
     def test_close_without_save_never_calls_handler(self, qapp) -> None:
-        """Closing the dialog (关闭) is not a save: the handler must stay
-        untouched so the current baseline/results can never change."""
-        from design_requirement_checker.ui.checklist_dialog import ChecklistDialog
+        """Leaving the section (返回文档核查) is not a save: the handler must
+        stay untouched so the current baseline/results can never change."""
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
 
         handler = MagicMock(return_value=True)
-        dialog = ChecklistDialog((_item("a"),), save_handler=handler)
-        dialog.reject()
+        dialog = ChecklistPage((_item("a"),), save_handler=handler)
+        dialog._on_close_requested()
         handler.assert_not_called()
 
 
@@ -781,51 +777,68 @@ class TestAliasMetadataPreservation:
         assert result[1].notes == "note-b"
 
 
-class TestManageButtonEnablement:
-    """检查项管理 availability derives from the UI lifecycle state."""
+class TestManageSectionAvailability:
+    """检查项管理 tab availability derives from the UI lifecycle state."""
 
     def test_enabled_when_idle(self, qapp) -> None:
         window = MainWindow(check_items=(_item("a"),))
         window._update_actions()
-        assert window._manage_button.isEnabled() is True
+        assert window._nav_tabs.isTabEnabled(1) is True
         window.close()
 
     def test_disabled_during_importing(self, qapp) -> None:
         window = MainWindow(check_items=(_item("a"),))
         window._state = UiState.IMPORTING
         window._update_actions()
-        assert window._manage_button.isEnabled() is False
+        assert window._nav_tabs.isTabEnabled(1) is False
         window.close()
 
     def test_disabled_during_verifying(self, qapp) -> None:
         window = MainWindow(check_items=(_item("a"),))
         window._state = UiState.VERIFYING
         window._update_actions()
-        assert window._manage_button.isEnabled() is False
+        assert window._nav_tabs.isTabEnabled(1) is False
         window.close()
 
 
-class TestManageDialogWiring:
-    """_on_manage_clicked opens the real dialog wired to the real save
-    handler and the current snapshot (function-local imports, so the patch
-    targets the defining module)."""
+class TestManageSectionWiring:
+    """_on_manage_clicked activates the real embedded page wired to the real
+    save handler and the current snapshot; leaving never publishes."""
 
-    def test_manage_opens_dialog_with_handler_and_current_items(self, qapp) -> None:
+    def test_manage_activates_page_with_handler_and_current_items(self, qapp) -> None:
         window = MainWindow(check_items=(_item("a"),))
-        dialog = MagicMock()
-        dialog.exec.return_value = QDialog.DialogCode.Rejected  # close, no save
-        with patch(
-            "design_requirement_checker.ui.checklist_dialog.ChecklistDialog",
-            return_value=dialog,
-        ) as mock_dialog:
-            window._on_manage_clicked()
+        window._on_manage_clicked()
+        assert window._nav_tabs.currentIndex() == 1
+        assert window._pages.currentIndex() == 1
+        page = window._management_page
+        assert page.current_items() == (_item("a"),)
+        assert page._save_handler == window._save_baseline_snapshot
 
-        args, kwargs = mock_dialog.call_args
-        assert args[0] == (_item("a"),)
-        assert kwargs["save_handler"] == window._save_baseline_snapshot
-        assert kwargs["parent"] is window
-        dialog.exec.assert_called_once()
-        assert window._check_items == (_item("a"),)  # reject never publishes
+        # Leaving the section without saving never publishes.
+        page._on_close_requested()
+        assert window._nav_tabs.currentIndex() == 0
+        assert window._check_items == (_item("a"),)
+        window.close()
+
+    def test_management_page_resyncs_after_baseline_change(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        window._on_manage_clicked()
+        assert window._management_page.current_items() == (_item("a"),)
+
+        # An external baseline change (set_check_items installs a new tuple)
+        # must replace a stale working copy on the next activation.
+        window.set_check_items((_item("b"),), baseline_id="bid-b")
+        window._on_manage_clicked()
+        assert window._management_page.current_items() == (_item("b"),)
+        window.close()
+
+    def test_management_candidate_survives_tab_switch(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        window._on_manage_clicked()
+        window._management_page._items.append(_item("b", phrase="功能B"))  # unsaved
+        window._nav_tabs.setCurrentIndex(0)
+        window._on_manage_clicked()
+        assert len(window._management_page.current_items()) == 2  # candidate kept
         window.close()
 
 

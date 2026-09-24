@@ -143,6 +143,17 @@ QHeaderView::section {{
     padding: 6px 10px;
 }}
 QTabWidget::pane {{ border: 0; }}
+QTabBar {{ background: transparent; }}
+QTabBar::tab {{
+    background: transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    padding: 12px 18px 9px 18px;
+    color: {TEXT};
+}}
+QTabBar::tab:hover {{ color: {FOCUS_RING}; }}
+QTabBar::tab:selected {{ color: {PRIMARY}; border-bottom: 3px solid {PRIMARY}; font-weight: 600; }}
+QTabBar::tab:disabled {{ color: #9aa7b6; }}
 """
 
 

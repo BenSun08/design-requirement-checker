@@ -1,22 +1,24 @@
-"""Checklist management dialog (Task 5).
+"""Checklist management page (T2 shell / Task 5 logic).
 
-Editable baseline workspace. The dialog renders the current snapshot in a
-QTableWidget, lets the reviewer Add/Edit items via ItemEditorDialog, and
-hands the updated immutable tuple to a save handler on 保存基准. The handler
-(also Task 5 UI wiring) validates and persists; only when it reports success
-does this dialog ``accept()`` and close. On validation or persistence
-failure the dialog stays open with the candidate rows intact, so an
+Editable baseline workspace, extracted verbatim from the former modal
+``ChecklistDialog`` so it can live as a primary application section (the
+检查项管理 navigation tab) instead of a modal utility. The page renders the
+current snapshot in a ``QTableWidget``, lets the reviewer Add/Edit items via
+``ItemEditorDialog``, and hands the updated immutable tuple to a save handler
+on 保存基准. The handler (wired by MainWindow) validates and persists; only
+when it reports success does this page emit ``saved``. On validation or
+persistence failure the page stays open with the candidate rows intact, so an
 unsuccessful save never silently discards the reviewer's edits. Save /
-persistence / result invalidation live in MainWindow — this dialog only
-mutates its own in-memory working copy. Qt-only: never touches JSON or
-matching directly.
+persistence / result invalidation live in MainWindow — this page only mutates
+its own in-memory working copy. Qt-only: never touches JSON or matching
+directly.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -44,15 +46,20 @@ _COLUMN_HEADERS = (
 )
 
 
-class ChecklistDialog(QDialog):
+class ChecklistPage(QWidget):
     """View and manage the current baseline in-memory working copy.
 
-    ``items`` is the immutable snapshot passed from MainWindow on open.
+    ``items`` is the immutable snapshot passed from MainWindow on activation.
     ``save_handler`` receives the candidate snapshot when the reviewer
     requests a save; it must return ``True`` only after validation and
-    persistence both succeeded — only then does the dialog accept and
-    close. Without a handler (stand-alone use) Save simply accepts.
+    persistence both succeeded — only then is ``saved`` emitted. Without a
+    handler (stand-alone use) Save simply emits ``saved``. ``close_requested``
+    mirrors the former dialog 关闭 path: it never calls the save handler, so
+    the current baseline and results can never change by leaving.
     """
+
+    saved = Signal()
+    close_requested = Signal()
 
     def __init__(
         self,
@@ -61,10 +68,6 @@ class ChecklistDialog(QDialog):
         save_handler: Callable[[tuple[CheckItem, ...]], bool] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("检查项管理")
-        self.resize(1040, 640)
-        self.setMinimumSize(800, 480)
-
         self._items: list[CheckItem] = list(items)
         self._save_handler = save_handler
 
@@ -116,26 +119,41 @@ class ChecklistDialog(QDialog):
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close
         )
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存基准")
-        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("返回文档核查")
         buttons.accepted.connect(self._on_save_requested)
-        buttons.rejected.connect(self.reject)
+        buttons.rejected.connect(self._on_close_requested)
         footer.addWidget(buttons)
         outer.addLayout(footer)
 
-    def _on_save_requested(self) -> None:
-        """Handle 保存基准 without closing on failure.
+    # --- working-copy sync ---------------------------------------------------
 
-        With a handler, the dialog closes (``accept()``) only when the
-        handler reports a fully successful validate+persist cycle. On
-        failure the handler has already shown the reason; the candidate
-        rows remain visible and editable. Without a handler the dialog
-        accepts directly (stand-alone usage).
+    def load_items(self, items: Sequence[CheckItem]) -> None:
+        """Reset the working copy to a new baseline snapshot.
+
+        Called by MainWindow when the current baseline changed since this
+        page was last synced (identity check on the immutable tuple), so a
+        re-activation never resurrectes a stale candidate over a saved one.
+        """
+        self._items = list(items)
+        self._refresh_table()
+
+    def _on_save_requested(self) -> None:
+        """Handle 保存基准 without discarding the candidate on failure.
+
+        ``saved`` is emitted only when the handler reports a fully successful
+        validate+persist cycle. On failure the handler has already shown the
+        reason; the candidate rows remain visible and editable. Without a
+        handler the page emits ``saved`` directly (stand-alone usage).
         """
         if self._save_handler is None:
-            self.accept()
+            self.saved.emit()
             return
         if self._save_handler(self.current_items()):
-            self.accept()
+            self.saved.emit()
+
+    def _on_close_requested(self) -> None:
+        """返回/关闭 without saving — the handler is never touched."""
+        self.close_requested.emit()
 
     def _populate_table(self) -> None:
         self._table.setRowCount(len(self._items))
