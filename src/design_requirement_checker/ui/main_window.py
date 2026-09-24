@@ -142,17 +142,21 @@ class UiState(Enum):
     FAILED = "failed"
 
 
+def _cell_path_text(location: DocumentLocation) -> str:
+    """One-based table-cell path of a location, without the paragraph index."""
+    cells = [*location.ancestor_path]
+    if location.cell is not None:
+        cells.append(location.cell)
+    return " › ".join(
+        f"表{c.table_index + 1} · 行{c.row_index + 1} · 单元格{c.column_index + 1}" for c in cells
+    )
+
+
 def format_location(location: DocumentLocation) -> str:
     """Human-readable one-based location; domain coordinates are zero-based."""
     if location.part == "body":
         return f"正文 · 段{location.paragraph_index + 1}"
-    cells = [*location.ancestor_path]
-    if location.cell is not None:
-        cells.append(location.cell)
-    cell_text = " › ".join(
-        f"表{c.table_index + 1} · 行{c.row_index + 1} · 单元格{c.column_index + 1}" for c in cells
-    )
-    return f"{cell_text} · 段{location.paragraph_index + 1}"
+    return f"{_cell_path_text(location)} · 段{location.paragraph_index + 1}"
 
 
 def _format_run_html(run: TextRun) -> str:
@@ -204,17 +208,45 @@ def _format_block_with_highlight(
 def format_blocks_html(document: Document) -> str:
     """Render document blocks as Qt rich text with strike formatting.
 
-    Run paragraphs use ``white-space: pre-wrap`` so multiple spaces and tabs
-    from the raw block text stay visible (Qt's rich-text engine collapses
-    them in plain ``<p>`` elements). The underlying domain text is unchanged.
+    Consecutive table-cell paragraphs of the same cell are grouped under one
+    cell header, and table-cell text is rendered on a tinted background so
+    table content is clearly distinguishable from body paragraphs. Every
+    paragraph keeps its own line, its own 段 index and its own runs — text is
+    never merged across paragraph or cell boundaries (constitution §6). Run
+    paragraphs use ``white-space: pre-wrap`` so multiple spaces and tabs from
+    the raw block text stay visible (Qt's rich-text engine collapses them in
+    plain ``<p>`` elements). The underlying domain text is unchanged.
     """
     if not document.blocks:
         return "<p>文档为空：未发现正文段落或表格内容。</p>"
     parts = [f"<p>{_LEGEND}</p>"]
-    for block in document.blocks:
-        runs_html = "".join(_format_run_html(run) for run in block.runs) or "（空段落）"
-        parts.append(f"<p><b>{html.escape(format_location(block.location))}</b></p>")
-        parts.append(f'<p style="white-space: pre-wrap">{runs_html}</p>')
+    blocks = document.blocks
+    index = 0
+    while index < len(blocks):
+        block = blocks[index]
+        if block.location.cell is None:
+            runs_html = "".join(_format_run_html(run) for run in block.runs) or "（空段落）"
+            parts.append(f"<p><b>{html.escape(format_location(block.location))}</b></p>")
+            parts.append(f'<p style="white-space: pre-wrap">{runs_html}</p>')
+            index += 1
+            continue
+        # Group consecutive paragraphs of the same table cell (same cell and
+        # ancestor path); non-adjacent blocks of one cell are never merged.
+        cell_key = (block.location.ancestor_path, block.location.cell)
+        group_end = index
+        while group_end < len(blocks):
+            location = blocks[group_end].location
+            if location.cell is None or (location.ancestor_path, location.cell) != cell_key:
+                break
+            group_end += 1
+        parts.append(f"<p><b>{html.escape(_cell_path_text(block.location))}</b></p>")
+        for cell_block in blocks[index:group_end]:
+            runs_html = "".join(_format_run_html(run) for run in cell_block.runs) or "（空段落）"
+            parts.append(
+                f'<p style="white-space: pre-wrap; background-color: #eef4fb">'
+                f"<b>段{cell_block.location.paragraph_index + 1}：</b>{runs_html}</p>"
+            )
+        index = group_end
     return "".join(parts)
 
 

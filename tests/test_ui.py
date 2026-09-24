@@ -1716,6 +1716,48 @@ class TestPureFormatting:
         html = format_blocks_html(document)
         assert "文档为空" in html
 
+    def test_table_cell_paragraphs_group_under_one_cell_header(self, tmp_path) -> None:
+        # Real 《设计开发要求》 documents store 功能描述 inside table cells.
+        # Consecutive paragraphs of one cell must render under a single cell
+        # header, each paragraph keeping its own 段 index and its own text —
+        # never merged across paragraph or cell boundaries.
+        document = import_document(fixtures.build_table_long_cell(tmp_path / "long-cell.docx"))
+        blocks_html = format_blocks_html(document)
+        long_text = "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        second_para = "输出具有短路保护功能，短路解除后自动恢复。"
+        # One grouped header for the description cell (no repeated 段 header).
+        assert blocks_html.count("表1 · 行1 · 单元格2") == 1
+        assert "段1：" in blocks_html
+        assert "段2：" in blocks_html
+        assert long_text in blocks_html
+        assert second_para in blocks_html
+        # Cell paragraphs stay visually distinct from body paragraphs.
+        assert 'style="white-space: pre-wrap; background-color: #eef4fb"' in blocks_html
+        # Body paragraph rendering is unchanged.
+        assert "正文 · 段1" in blocks_html
+        assert "功能要求汇总" in blocks_html
+
+    def test_long_table_cell_text_is_visible_in_window(self, qapp, tmp_path) -> None:
+        # End-to-end regression: importing a table-heavy document shows the
+        # actual table-cell text in the document inspection detail view,
+        # with the source location still visible.
+        document = import_document(fixtures.build_table_long_cell(tmp_path / "long-cell.docx"))
+        window = MainWindow()
+        window.show_import_outcome(document)
+        plain = window._detail_view.toPlainText()
+        long_text = "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        second_para = "输出具有短路保护功能，短路解除后自动恢复。"
+        assert long_text in plain
+        assert second_para in plain
+        assert "表1 · 行1 · 单元格2" in plain
+        # The text survives Qt's rich-text rendering, not just the HTML source.
+        rendered = QTextDocument()
+        rendered.setHtml(window._detail_view.toHtml())
+        visible = rendered.toPlainText()
+        assert long_text in visible
+        assert second_para in visible
+        window.close()
+
 
 class TestWindowDisplay:
     def test_document_outcome_populates_summary_and_blocks(self, qapp, tmp_path) -> None:
