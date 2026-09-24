@@ -276,7 +276,7 @@ def inspect_and_close():
 QTimer.singleShot(100, inspect_and_close)
 assert main([]) == 0
 assert len(observed) == 1, "Startup must show one main window"
-assert sorted(enabled_actions) == ["导入 DOCX"], \\
+assert sorted(enabled_actions) == ["选择 DOCX", "选择 DOCX 文件"], \\
        "Only implemented operations may be enabled"
 """
     result = subprocess.run(

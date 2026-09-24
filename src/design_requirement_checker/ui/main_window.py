@@ -451,63 +451,152 @@ class MainWindow(QMainWindow):
         return f"检查项管理 ({len(self._check_items)})"
 
     def _build_workspace_page(self) -> QWidget:
-        """The 文档核查 page: notices, actions, summary, filters, splitter."""
+        """The 文档核查 page: notices, document bar, empty/work areas."""
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(12)
 
-        notice = QLabel(
-            "导入 DOCX 文档后可执行后台核查，查看结果列表与详情。"
-            "切换到 “检查项管理” 可编辑基准内容。"
-        )
-        notice.setWordWrap(True)
-        notice.setStyleSheet(f"color: {style.MUTED};")
-        layout.addWidget(notice)
+        # Persistent startup/recovery banner (backup / load error / schema).
+        self._baseline_banner = QLabel("")
+        self._baseline_banner.setWordWrap(True)
+        self._baseline_banner.setVisible(False)
+        layout.addWidget(self._baseline_banner)
 
-        actions = QHBoxLayout()
-        self._import_button = QPushButton("导入 DOCX")
+        # LIMITED coverage notice — compact card, never buried or hidden.
+        self._warnings_label = QLabel("")
+        self._warnings_label.setWordWrap(True)
+        self._warnings_label.setVisible(False)
+        self._warnings_label.setStyleSheet(
+            f"background: {style.WARNING_BG}; color: {style.WARNING_TEXT};"
+            f"border: 1px solid {style.WARNING_BORDER}; border-radius: 4px; padding: 8px 12px;"
+        )
+        layout.addWidget(self._warnings_label)
+
+        # --- document bar (prototype document-bar) ---
+        bar = QWidget()
+        bar.setObjectName("documentBar")
+        bar.setStyleSheet(
+            f"background: {style.CARD}; border: 1px solid {style.BORDER}; border-radius: 4px;"
+        )
+        bar_row = QHBoxLayout(bar)
+        bar_row.setContentsMargins(16, 12, 16, 12)
+        bar_row.setSpacing(12)
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        caption = QLabel("当前文档")
+        caption.setStyleSheet(f"color: {style.MUTED};")
+        self._doc_name_label = QLabel("尚未选择文档")
+        name_font = self._doc_name_label.font()
+        name_font.setBold(True)
+        self._doc_name_label.setFont(name_font)
+        self._doc_name_label.setWordWrap(True)
+        self._doc_state_label = QLabel("等待导入")
+        self._doc_state_label.setWordWrap(True)
+        self._doc_state_label.setStyleSheet(f"color: {style.MUTED};")
+        left.addWidget(caption)
+        left.addWidget(self._doc_name_label)
+        left.addWidget(self._doc_state_label)
+        bar_row.addLayout(left)
+        bar_row.addStretch()
+
+        actions = QVBoxLayout()
+        actions.setSpacing(style.SPACING)
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(style.SPACING)
+        self._import_button = QPushButton("选择 DOCX")
         self._import_button.clicked.connect(self._on_import_clicked)
-        actions.addWidget(self._import_button)
+        buttons_row.addWidget(self._import_button)
         self._run_button = QPushButton("开始核查")
         self._run_button.setEnabled(False)
         style.mark_primary(self._run_button)
         self._run_button.clicked.connect(self._on_run_clicked)
-        actions.addWidget(self._run_button)
+        buttons_row.addWidget(self._run_button)
         self._cancel_button = QPushButton("取消核查")
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._on_cancel_clicked)
-        actions.addWidget(self._cancel_button)
+        buttons_row.addWidget(self._cancel_button)
+        actions.addLayout(buttons_row)
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)  # indeterminate
         self._progress.setVisible(False)
         actions.addWidget(self._progress)
-        actions.addStretch()
-        layout.addLayout(actions)
+        bar_row.addLayout(actions)
+        layout.addWidget(bar)
 
+        # Document info line: filename | fingerprint | coverage | blocks.
         self._summary_label = QLabel("尚未导入文档。")
         self._summary_label.setWordWrap(True)
-        self._warnings_label = QLabel("")
-        self._warnings_label.setWordWrap(True)
-        self._warnings_label.setVisible(False)
-        self._baseline_banner = QLabel("")
-        self._baseline_banner.setWordWrap(True)
-        self._baseline_banner.setVisible(False)
+        self._summary_label.setStyleSheet(f"color: {style.MUTED};")
+        self._summary_label.setVisible(False)
+        layout.addWidget(self._summary_label)
 
-        # Summary + search strip.
-        strip = QHBoxLayout()
-        strip.addWidget(self._summary_label)
-        strip.addWidget(self._warnings_label)
-        strip.addStretch()
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("搜索：编号 / 名称 / 类别 / 期望描述")
-        self._search_input.setClearButtonEnabled(True)
-        self._search_input.textChanged.connect(self._populate_results)
-        strip.addWidget(self._search_input)
-        layout.addLayout(strip)
-        layout.addWidget(self._baseline_banner)
+        # Empty import state vs the review work area.
+        self._workspace_stack = QStackedWidget()
+        self._workspace_stack.addWidget(self._build_empty_state())
+        self._workspace_stack.addWidget(self._build_work_area())
+        layout.addWidget(self._workspace_stack, 1)
+        return page
 
-        # Filter buttons.
+    def _build_empty_state(self) -> QWidget:
+        """Prototype dropzone look — without drag/drop and without any mock
+        使用示例文档 action (production parses the real file)."""
+        card = QWidget()
+        card.setObjectName("emptyStateCard")
+        card.setStyleSheet(
+            f"background: {style.CARD}; border: 2px dashed #adbdd0; border-radius: 5px;"
+        )
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(54, 40, 54, 40)
+        outer.setSpacing(10)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        symbol = QLabel("W")
+        symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        symbol.setStyleSheet(
+            f"background: {style.PRIMARY_LIGHT}; color: {style.PRIMARY};"
+            f"border: 1px solid #bfd0e7; padding: 14px 20px;"
+            " font-size: 28px; font-weight: 600;"
+        )
+        outer.addWidget(symbol, 0, Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("导入《设计开发要求》")
+        title_font = title.font()
+        title_font.setBold(True)
+        title_font.setPointSizeF(15)
+        title.setFont(title_font)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        outer.addWidget(title)
+        instruction = QLabel("点击下方按钮选择 .docx 文件（本地解析 · 不上传文件）")
+        instruction.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        instruction.setWordWrap(True)
+        instruction.setStyleSheet(f"color: {style.MUTED};")
+        outer.addWidget(instruction)
+        self._empty_import_button = QPushButton("选择 DOCX 文件")
+        style.mark_primary(self._empty_import_button)
+        self._empty_import_button.clicked.connect(self._on_import_clicked)
+        outer.addWidget(self._empty_import_button, 0, Qt.AlignmentFlag.AlignCenter)
+        self._empty_caption = QLabel()
+        self._empty_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_caption.setWordWrap(True)
+        self._empty_caption.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        self._empty_caption.setText(self._empty_state_caption())
+        outer.addWidget(self._empty_caption)
+        return card
+
+    def _empty_state_caption(self) -> str:
+        """Honest baseline summary — no mock claims, no result promises."""
+        if self._check_items:
+            return f"{len(self._check_items)} 个检查项 · 本地核查"
+        return "尚未配置检查基准 — 切换到 “检查项管理” 新增"
+
+    def _build_work_area(self) -> QWidget:
+        """Filters, search and the result/detail splitter."""
+        area = QWidget()
+        layout = QVBoxLayout(area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # Filter buttons + search.
         self._current_filter = "全部"
         self._filter_buttons: dict[str, QPushButton] = {}
         filter_row = QHBoxLayout()
@@ -519,6 +608,11 @@ class MainWindow(QMainWindow):
             self._filter_buttons[name] = btn
             filter_row.addWidget(btn)
         filter_row.addStretch()
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("搜索：编号 / 名称 / 类别 / 期望描述")
+        self._search_input.setClearButtonEnabled(True)
+        self._search_input.textChanged.connect(self._populate_results)
+        filter_row.addWidget(self._search_input)
         layout.addLayout(filter_row)
 
         # Result list (left) + detail (right).
@@ -534,7 +628,7 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 3)
         layout.addWidget(self._splitter, 1)
         self._result_list.currentItemChanged.connect(self._on_result_selected)
-        return page
+        return area
 
     # --- navigation (prototype: tabs, not a modal utility) -----------------
 
@@ -621,6 +715,7 @@ class MainWindow(QMainWindow):
         self._op_generation += 1
         self._state = UiState.VERIFYING
         self._results = ()
+        self._set_doc_state("正在核查…")
         self._update_actions()
         return self._op_generation
 
@@ -632,6 +727,7 @@ class MainWindow(QMainWindow):
         self._state = UiState.COMPLETED
         self._populate_results()
         self._update_summary()
+        self._set_doc_state("核查完成")
         self._update_actions()
         return True
 
@@ -933,12 +1029,14 @@ class MainWindow(QMainWindow):
         """Mark the run cancelled; results stay empty, never completed."""
         self._state = UiState.CANCELLED
         self._results = ()
+        self._set_doc_state("已取消核查 — 可重新核查")
         self._update_actions()
 
     def fail_verification(self, message: str) -> None:
         """Mark the run failed; results stay empty, never completed."""
         self._state = UiState.FAILED
         self._results = ()
+        self._set_doc_state("核查失败")
         self.statusBar().showMessage(f"核查失败：{message}")
         self._update_actions()
 
@@ -948,6 +1046,7 @@ class MainWindow(QMainWindow):
         s = self._state
         idle_for_ui = s not in (UiState.IMPORTING, UiState.VERIFYING)
         self._import_button.setEnabled(idle_for_ui)
+        self._empty_import_button.setEnabled(idle_for_ui)
         can_run = self._document is not None and self.has_check_items
         runnable_states = (
             UiState.READY,
@@ -961,6 +1060,15 @@ class MainWindow(QMainWindow):
         # The management section is available whenever no background work is
         # running (same rule the former modal entry button carried).
         self._nav_tabs.setTabEnabled(1, idle_for_ui)
+        # Empty import state vs the review work area. A first import keeps
+        # the empty card visible (with a busy document bar); an import
+        # failure must show its reason in the detail view instead.
+        show_empty = self._document is None and s is not UiState.FAILED
+        self._workspace_stack.setCurrentIndex(0 if show_empty else 1)
+
+    def _set_doc_state(self, text: str) -> None:
+        """Update the document-bar run-state line (导入/核查 lifecycle)."""
+        self._doc_state_label.setText(text)
 
     # --- background import --------------------------------------------------
 
@@ -979,6 +1087,7 @@ class MainWindow(QMainWindow):
         self._state = UiState.IMPORTING
         self._results = ()
         self._progress.setVisible(True)
+        self._set_doc_state("正在导入…")
         self.statusBar().showMessage("正在读取文档…")
         self._update_actions()
 
@@ -1233,6 +1342,7 @@ class MainWindow(QMainWindow):
         if baseline_id:
             self._baseline_id = baseline_id
         self._nav_tabs.setTabText(1, self._management_tab_text())
+        self._empty_caption.setText(self._empty_state_caption())
         self._results = ()
         self._result_list.clear()
         self._detail_view.clear()
@@ -1272,7 +1382,9 @@ class MainWindow(QMainWindow):
             self._state = UiState.FAILED
             self._document = None
             self._results = ()
+            self._set_doc_state("导入失败")
             self._summary_label.setText("导入失败：出现意外错误")
+            self._summary_label.setVisible(True)
             self._detail_view.setHtml(f"<p>无法读取所选文件：{html.escape(detail)}</p>")
             self.statusBar().showMessage("导入失败")
             self._update_actions()
@@ -1285,10 +1397,13 @@ class MainWindow(QMainWindow):
             coverage_text = "完全"
         else:
             coverage_text = f"受限（{len(document.warnings)} 项警告）"
+        self._doc_name_label.setText(document.filename)
+        self._set_doc_state("已导入 · 尚未核查")
         self._summary_label.setText(
             f"文件：{document.filename}｜指纹：{document.content_fingerprint[:12]}…"
             f"｜覆盖范围：{coverage_text}｜文本块：{len(document.blocks)}"
         )
+        self._summary_label.setVisible(True)
         if document.warnings:
             self._warnings_label.setText("检查范围受限：" + "、".join(document.warnings))
             self._warnings_label.setVisible(True)
@@ -1305,7 +1420,9 @@ class MainWindow(QMainWindow):
         self._document = None
         self._results = ()
         self._state = UiState.FAILED
+        self._set_doc_state("导入失败")
         self._summary_label.setText(f"导入失败：{failure.filename}")
+        self._summary_label.setVisible(True)
         self._warnings_label.setText("")
         self._warnings_label.setVisible(False)
         self._detail_view.setHtml(
