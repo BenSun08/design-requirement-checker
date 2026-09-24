@@ -255,6 +255,44 @@ class TestTablesAndLocations:
         assert len(document.blocks) == 9
 
 
+@pytest.fixture(scope="module")
+def table_content_controls(tmp_path_factory: pytest.TempPathFactory):
+    return fixtures.build_table_content_controls(
+        tmp_path_factory.mktemp("a-sdt-table") / "sdt-table.docx"
+    )
+
+
+class TestTableContentControls:
+    """Content controls wrapping table rows/cells stay outside the supported
+    scope but must never vanish silently (docs/constitution.md §6)."""
+
+    def test_unwrapped_cells_are_still_extracted(self, table_content_controls) -> None:
+        document = read_document(table_content_controls)
+        assert [block.text for block in document.blocks] == [
+            "intro",
+            "VISIBLE-A",
+            "VISIBLE-B",
+            "VISIBLE-C",
+        ]
+        assert [block.block_id for block in document.blocks] == [
+            "body:p0",
+            "t0r0c0:table-cell:p0",
+            "t0r0c1:table-cell:p0",
+            "t0r1c0:table-cell:p0",
+        ]
+
+    def test_sdt_wrapped_cell_and_row_raise_explicit_warning(self, table_content_controls) -> None:
+        document = read_document(table_content_controls)
+        all_text = "\n".join(block.text for block in document.blocks)
+        # The sdt-wrapped cell (row 2, col 2) and the sdt-wrapped whole row
+        # are excluded — but visibly, via the shared warning token.
+        assert "SDT-CELL" not in all_text
+        assert "SDT-ROW-A" not in all_text
+        assert "SDT-ROW-B" not in all_text
+        assert document.coverage is Coverage.LIMITED
+        assert document.warnings == ("content-control-content-excluded",)
+
+
 class TestHyperlinkExtraction:
     def test_hyperlink_text_appears_in_order_with_contiguous_offsets(self, hyperlink) -> None:
         document = read_document(hyperlink)

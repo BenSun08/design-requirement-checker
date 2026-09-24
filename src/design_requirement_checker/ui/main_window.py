@@ -14,6 +14,7 @@ Task 4 subtasks; the state transitions here are the foundation they build on.
 
 from __future__ import annotations
 
+import difflib
 import html
 import threading
 from collections.abc import Callable, Sequence
@@ -142,17 +143,21 @@ class UiState(Enum):
     FAILED = "failed"
 
 
+def _cell_path_text(location: DocumentLocation) -> str:
+    """One-based table-cell path of a location, without the paragraph index."""
+    cells = [*location.ancestor_path]
+    if location.cell is not None:
+        cells.append(location.cell)
+    return " › ".join(
+        f"表{c.table_index + 1} · 行{c.row_index + 1} · 单元格{c.column_index + 1}" for c in cells
+    )
+
+
 def format_location(location: DocumentLocation) -> str:
     """Human-readable one-based location; domain coordinates are zero-based."""
     if location.part == "body":
         return f"正文 · 段{location.paragraph_index + 1}"
-    cells = [*location.ancestor_path]
-    if location.cell is not None:
-        cells.append(location.cell)
-    cell_text = " › ".join(
-        f"表{c.table_index + 1} · 行{c.row_index + 1} · 单元格{c.column_index + 1}" for c in cells
-    )
-    return f"{cell_text} · 段{location.paragraph_index + 1}"
+    return f"{_cell_path_text(location)} · 段{location.paragraph_index + 1}"
 
 
 def _format_run_html(run: TextRun) -> str:
@@ -201,20 +206,75 @@ def _format_block_with_highlight(
     return rendered or "（空段落）"
 
 
+def _description_diff_html(expected: str, actual: str) -> str:
+    """Presentation-only character-level diff of expected vs actual description.
+
+    Explanation aid for ``ComparisonState.DIFFERENT`` results. It never
+    changes comparison semantics — matching already decided DIFFERENT; this
+    only shows where the two texts differ. Common text stays plain, text only
+    in the expected description is struck through, text only in the actual
+    description is highlighted. Uses stdlib ``difflib`` over raw characters
+    (Chinese text has no spaces to split on) without any extra normalization
+    beyond what matching itself applied.
+    """
+    matcher = difflib.SequenceMatcher(a=expected, b=actual, autojunk=False)
+    pieces: list[str] = []
+    for tag, a_start, a_end, b_start, b_end in matcher.get_opcodes():
+        if tag == "equal":
+            pieces.append(html.escape(expected[a_start:a_end]))
+            continue
+        if tag in ("delete", "replace"):
+            pieces.append(
+                '<span style="color: #842029; text-decoration: line-through">'
+                f"{html.escape(expected[a_start:a_end])}</span>"
+            )
+        if tag in ("insert", "replace"):
+            pieces.append(f"<mark>{html.escape(actual[b_start:b_end])}</mark>")
+    return "".join(pieces)
+
+
 def format_blocks_html(document: Document) -> str:
     """Render document blocks as Qt rich text with strike formatting.
 
-    Run paragraphs use ``white-space: pre-wrap`` so multiple spaces and tabs
-    from the raw block text stay visible (Qt's rich-text engine collapses
-    them in plain ``<p>`` elements). The underlying domain text is unchanged.
+    Consecutive table-cell paragraphs of the same cell are grouped under one
+    cell header, and table-cell text is rendered on a tinted background so
+    table content is clearly distinguishable from body paragraphs. Every
+    paragraph keeps its own line, its own 段 index and its own runs — text is
+    never merged across paragraph or cell boundaries (constitution §6). Run
+    paragraphs use ``white-space: pre-wrap`` so multiple spaces and tabs from
+    the raw block text stay visible (Qt's rich-text engine collapses them in
+    plain ``<p>`` elements). The underlying domain text is unchanged.
     """
     if not document.blocks:
         return "<p>文档为空：未发现正文段落或表格内容。</p>"
     parts = [f"<p>{_LEGEND}</p>"]
-    for block in document.blocks:
-        runs_html = "".join(_format_run_html(run) for run in block.runs) or "（空段落）"
-        parts.append(f"<p><b>{html.escape(format_location(block.location))}</b></p>")
-        parts.append(f'<p style="white-space: pre-wrap">{runs_html}</p>')
+    blocks = document.blocks
+    index = 0
+    while index < len(blocks):
+        block = blocks[index]
+        if block.location.cell is None:
+            runs_html = "".join(_format_run_html(run) for run in block.runs) or "（空段落）"
+            parts.append(f"<p><b>{html.escape(format_location(block.location))}</b></p>")
+            parts.append(f'<p style="white-space: pre-wrap">{runs_html}</p>')
+            index += 1
+            continue
+        # Group consecutive paragraphs of the same table cell (same cell and
+        # ancestor path); non-adjacent blocks of one cell are never merged.
+        cell_key = (block.location.ancestor_path, block.location.cell)
+        group_end = index
+        while group_end < len(blocks):
+            location = blocks[group_end].location
+            if location.cell is None or (location.ancestor_path, location.cell) != cell_key:
+                break
+            group_end += 1
+        parts.append(f"<p><b>{html.escape(_cell_path_text(block.location))}</b></p>")
+        for cell_block in blocks[index:group_end]:
+            runs_html = "".join(_format_run_html(run) for run in cell_block.runs) or "（空段落）"
+            parts.append(
+                f'<p style="white-space: pre-wrap; background-color: #eef4fb">'
+                f"<b>段{cell_block.location.paragraph_index + 1}：</b>{runs_html}</p>"
+            )
+        index = group_end
     return "".join(parts)
 
 
@@ -660,7 +720,18 @@ class MainWindow(QMainWindow):
         ]
         if result.status is CheckStatus.MISSING:
             parts.append("<p>在已检查范围内未找到匹配证据</p>")
-        if actual_text:
+        if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
+            # DIFFERENT results must explain themselves: the raw readable
+            # actual text plus a where-do-they-differ rendering. The raw
+            # requirement slice is the source text — never the normalized
+            # comparison form (presentation only; matching is unchanged).
+            req_start, req_end = selected.requirement_span
+            actual_raw = selected.raw_text[req_start:req_end]
+            parts.append(f"<p>实际描述：{html.escape(actual_raw)}</p>")
+            parts.append(
+                f"<p>差异详情：{_description_diff_html(item.expected_description, actual_raw)}</p>"
+            )
+        elif actual_text:
             if result.status is CheckStatus.STRUCK_OUT:
                 parts.append(f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>")
             else:
@@ -824,9 +895,19 @@ class MainWindow(QMainWindow):
         """Remove exactly the thread that finished from every ownership
         structure, by identity so stale-generation handlers can't block cleanup.
 
+        ``QThread.finished`` is emitted just *before* the OS thread terminates,
+        so this queued handler can run while the thread is still executing its
+        final instructions. Join that remainder here — bounded to microseconds
+        because ``finished`` was already emitted, unlike an unbounded
+        close-time wait — so an empty ``_active_threads`` guarantees every
+        owned thread has fully terminated and is safe to destroy. Releasing a
+        still-terminating QThread for destruction fast-fails the whole process
+        on Windows (0xC0000409).
+
         After cleanup, if a deferred close is pending and no threads remain,
         schedule a non-reentrant close retry on the UI event loop.
         """
+        thread.wait()
         if thread in self._active_threads:
             self._active_threads.remove(thread)
         # Clean thread_for_generation by identity in case the generation-based

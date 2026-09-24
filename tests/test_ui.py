@@ -38,6 +38,7 @@ from design_requirement_checker.domain import (
 from design_requirement_checker.ui.main_window import (
     MainWindow,
     UiState,
+    _description_diff_html,
     format_blocks_html,
     format_location,
 )
@@ -446,6 +447,51 @@ class TestBackgroundImport:
         # A thread not in the set is a no-op.
         window._on_thread_finished(t1)
         assert window._active_threads == []
+        window.close()
+
+    def test_on_thread_finished_joins_thread_before_releasing_ownership(self, qapp) -> None:
+        """``QThread.finished`` is emitted *before* the OS thread terminates,
+        so ownership must only be released once the thread has fully stopped.
+        Otherwise a close/quit that observes an empty ``_active_threads`` can
+        destroy a still-terminating QThread — the Windows fast-fail 0xC0000409
+        the subprocess startup test hit on CI."""
+        from PySide6.QtCore import QThread
+
+        window = MainWindow()
+        thread = QThread()
+        thread.start()
+        window._active_threads = [thread]
+
+        # The thread's event loop is quit from a side Python thread after a
+        # short delay. Without the join in _on_thread_finished, ownership is
+        # released while the thread is still running and isFinished() below
+        # fails deterministically (quit has not even been requested yet).
+        threading.Timer(0.1, thread.quit).start()
+        window._on_thread_finished(thread)
+
+        assert window._active_threads == []
+        assert thread.isFinished()
+        assert not thread.isRunning()
+        window.close()
+
+    def test_verification_release_implies_retired_thread_terminated(self, qapp, tmp_path) -> None:
+        """End-to-end invariant the startup subprocess test relies on: once
+        ``_active_threads`` is empty after a real verification run, the
+        retired thread has fully terminated and is safe to destroy."""
+        document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._on_run_clicked()
+        retired = window._thread
+        assert retired is not None
+
+        assert _process_until(
+            qapp,
+            lambda: not window._active_threads and window.state is UiState.COMPLETED,
+            timeout_ms=4000,
+        )
+        assert retired.isFinished()
+        assert not retired.isRunning()
         window.close()
 
 
@@ -1123,6 +1169,36 @@ class TestFiltersAndSearch:
         window.close()
 
 
+class TestDescriptionDiff:
+    """Presentation-only diff rendering for 描述有差异 results."""
+
+    def test_common_text_stays_plain_and_differences_are_marked(self) -> None:
+        expected = "2门控制增加开关门延时2s功能"
+        actual = "2门控制增加开关门延时3s功能"
+        diff = _description_diff_html(expected, actual)
+        # Common prefix renders as plain text.
+        assert "2门控制增加开关门延时" in diff
+        # Character-level: only the differing digit is struck/marked; the
+        # shared unit "s" stays plain — the swap is visible in place.
+        assert 'text-decoration: line-through">2<' in diff
+        assert "<mark>3</mark>" in diff
+        assert "s功能" in diff
+
+    def test_identical_texts_render_without_marks(self) -> None:
+        diff = _description_diff_html("延时3s输出", "延时3s输出")
+        assert "<mark>" not in diff
+        assert "line-through" not in diff
+        assert "延时3s输出" in diff
+
+    def test_insertions_and_deletions_are_both_shown(self) -> None:
+        diff = _description_diff_html("车门打开时点亮", "车门打开时室内灯点亮")
+        assert "<mark>室内灯</mark>" in diff
+
+    def test_html_special_characters_are_escaped(self) -> None:
+        assert 'line-through">&lt;b&gt;</span>' in _description_diff_html("<b>", "")
+        assert "<mark>&lt;i&gt;</mark>" in _description_diff_html("", "<i>")
+
+
 class TestResultDetail:
     def test_detail_shows_code_name_category(self, qapp) -> None:
         item = CheckItem(
@@ -1253,6 +1329,40 @@ class TestResultDetail:
         text = window._detail_view.toPlainText()
         assert "2门控制增加开关门延时2s功能" in text
         assert "2门控制增加开关门延时3s功能" in text
+        window.close()
+
+    def test_different_result_shows_expected_actual_and_diff(self, qapp) -> None:
+        # 描述有差异 must explain itself: expected description, the raw
+        # readable actual text, and a where-do-they-differ rendering.
+        item = CheckItem(
+            item_id="a",
+            code="A",
+            name="n",
+            detection_phrase="x",
+            expected_description="2门控制增加开关门延时2s功能",
+        )
+        ev = _evidence(requirement_text="2门控制增加开关门延时3s功能")
+        result = CheckResult(
+            check_item=item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(ev,),
+            comparison_state=ComparisonState.DIFFERENT,
+            comparison_reason="",
+            review_reasons=(),
+            rule_revision="r1",
+            primary_evidence_id="e1",
+        )
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "期望描述：2门控制增加开关门延时2s功能" in text
+        assert "实际描述：2门控制增加开关门延时3s功能" in text
+        # The 差异详情 line carries the difference in place: only the
+        # differing digit is struck/marked, the shared unit stays plain.
+        # (Markup formatting itself is asserted by TestDescriptionDiff.)
+        assert "差异详情：2门控制增加开关门延时23s功能" in text
         window.close()
 
     def test_match_method_label(self, qapp) -> None:
@@ -1715,6 +1825,54 @@ class TestPureFormatting:
         document = import_document(fixtures.build_empty(tmp_path / "empty.docx"))
         html = format_blocks_html(document)
         assert "文档为空" in html
+
+    def test_table_cell_paragraphs_group_under_one_cell_header(self, tmp_path) -> None:
+        # Real 《设计开发要求》 documents store 功能描述 inside table cells.
+        # Consecutive paragraphs of one cell must render under a single cell
+        # header, each paragraph keeping its own 段 index and its own text —
+        # never merged across paragraph or cell boundaries.
+        document = import_document(fixtures.build_table_long_cell(tmp_path / "long-cell.docx"))
+        blocks_html = format_blocks_html(document)
+        long_text = (
+            "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；"
+            "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        )
+        second_para = "输出具有短路保护功能，短路解除后自动恢复。"
+        # One grouped header for the description cell (no repeated 段 header).
+        assert blocks_html.count("表1 · 行1 · 单元格2") == 1
+        assert "段1：" in blocks_html
+        assert "段2：" in blocks_html
+        assert long_text in blocks_html
+        assert second_para in blocks_html
+        # Cell paragraphs stay visually distinct from body paragraphs.
+        assert 'style="white-space: pre-wrap; background-color: #eef4fb"' in blocks_html
+        # Body paragraph rendering is unchanged.
+        assert "正文 · 段1" in blocks_html
+        assert "功能要求汇总" in blocks_html
+
+    def test_long_table_cell_text_is_visible_in_window(self, qapp, tmp_path) -> None:
+        # End-to-end regression: importing a table-heavy document shows the
+        # actual table-cell text in the document inspection detail view,
+        # with the source location still visible.
+        document = import_document(fixtures.build_table_long_cell(tmp_path / "long-cell.docx"))
+        window = MainWindow()
+        window.show_import_outcome(document)
+        plain = window._detail_view.toPlainText()
+        long_text = (
+            "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；"
+            "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+        )
+        second_para = "输出具有短路保护功能，短路解除后自动恢复。"
+        assert long_text in plain
+        assert second_para in plain
+        assert "表1 · 行1 · 单元格2" in plain
+        # The text survives Qt's rich-text rendering, not just the HTML source.
+        rendered = QTextDocument()
+        rendered.setHtml(window._detail_view.toHtml())
+        visible = rendered.toPlainText()
+        assert long_text in visible
+        assert second_para in visible
+        window.close()
 
 
 class TestWindowDisplay:

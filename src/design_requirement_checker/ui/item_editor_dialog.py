@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QTextEdit,
     QWidget,
 )
@@ -53,8 +54,10 @@ class ItemEditorDialog(QDialog):
             self.setWindowTitle("编辑检查项")
             self._item_id = existing.item_id  # preserve stable ID
 
-        self.resize(520, 560)
-        self.setMinimumWidth(420)
+        # Large enough for long engineering descriptions, and resizable so
+        # the user can enlarge it for pasting/reading multi-line text.
+        self.resize(760, 640)
+        self.setMinimumSize(560, 520)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -75,7 +78,12 @@ class ItemEditorDialog(QDialog):
         self._category_edit = QLineEdit(existing.category if existing else "")
         form.addRow("类别", self._category_edit)
 
-        self._expected_edit = QLineEdit(existing.expected_description if existing else "")
+        # Multi-line plain-text editor: real engineering descriptions are
+        # long; a single-line QLineEdit forces truncating review and makes
+        # pasting/reading multi-paragraph text impractical.
+        self._expected_edit = QPlainTextEdit(existing.expected_description if existing else "")
+        self._expected_edit.setPlaceholderText("选填，可粘贴多行期望描述")
+        self._expected_edit.setMinimumHeight(96)
         form.addRow("期望描述", self._expected_edit)
 
         self._notes_edit = QLineEdit(existing.notes if existing else "")
@@ -143,7 +151,7 @@ class ItemEditorDialog(QDialog):
             detection_phrase=self._phrase_edit.text().strip(),
             aliases=aliases,
             category=self._category_edit.text().strip(),
-            expected_description=self._expected_edit.text().strip(),
+            expected_description=self._expected_edit.toPlainText().strip(),
             enabled=self._enabled_check.isChecked(),
             notes=self._notes_edit.text().strip(),
         )

@@ -657,7 +657,7 @@ class TestItemEditorFields:
         dlg._code_edit.setText("C1")
         dlg._name_edit.setText("N")
         dlg._phrase_edit.setText("P")
-        dlg._expected_edit.setText("")
+        dlg._expected_edit.setPlainText("")
         dlg._on_save()
         candidate = dlg.candidate()
         assert candidate is not None
@@ -674,6 +674,45 @@ class TestItemEditorFields:
         assert candidate is not None
         assert candidate.item_id == "keep-id"
         assert candidate.name == "Renamed"
+
+    def test_expected_description_is_multi_line_editor(self, qapp) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        assert isinstance(dlg._expected_edit, QPlainTextEdit)
+        # Several lines visible by default; dialog large and resizable.
+        assert dlg._expected_edit.minimumHeight() >= 96
+        assert dlg.minimumWidth() >= 560
+        assert dlg.minimumHeight() >= 520
+
+    def test_long_multiline_expected_description_loads_edits_saves(self, qapp) -> None:
+        """Real engineering descriptions are long: load → edit → save must
+        round-trip the full multi-line text without truncation."""
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        long_desc = (
+            "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；\n"
+            "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复；\n"
+            "输出具有短路保护功能，短路解除后自动恢复，并记录故障码。"
+        )
+        existing = CheckItem(
+            item_id="long-item",
+            code="L-01",
+            name="长描述项",
+            detection_phrase="延时上电",
+            expected_description=long_desc,
+        )
+        dlg = ItemEditorDialog(existing=existing)
+        assert dlg._expected_edit.toPlainText() == long_desc  # loads untruncated
+        edited = long_desc + "\n追加一行：低温启动功能要求。"
+        dlg._expected_edit.setPlainText(edited)
+        dlg._on_save()
+        candidate = dlg.candidate()
+        assert candidate is not None
+        assert candidate.expected_description == edited  # saves untruncated
+        assert candidate.expected_description.count("\n") == 3
 
 
 class TestAliasMetadataPreservation:
