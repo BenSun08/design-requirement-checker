@@ -58,6 +58,7 @@ from design_requirement_checker.domain import (
     Resolution,
     TextRun,
 )
+from design_requirement_checker.ui import style
 from design_requirement_checker.ui.workers import ImportWorker, VerificationWorker
 
 if TYPE_CHECKING:
@@ -225,7 +226,7 @@ def _description_diff_html(expected: str, actual: str) -> str:
             continue
         if tag in ("delete", "replace"):
             pieces.append(
-                '<span style="color: #842029; text-decoration: line-through">'
+                f'<span style="color: {style.DIFF_DELETE}; text-decoration: line-through">'
                 f"{html.escape(expected[a_start:a_end])}</span>"
             )
         if tag in ("insert", "replace"):
@@ -271,7 +272,7 @@ def format_blocks_html(document: Document) -> str:
         for cell_block in blocks[index:group_end]:
             runs_html = "".join(_format_run_html(run) for run in cell_block.runs) or "（空段落）"
             parts.append(
-                f'<p style="white-space: pre-wrap; background-color: #eef4fb">'
+                f'<p style="white-space: pre-wrap; background-color: {style.TABLE_CELL_TINT}">'
                 f"<b>段{cell_block.location.paragraph_index + 1}：</b>{runs_html}</p>"
             )
         index = group_end
@@ -537,7 +538,7 @@ class MainWindow(QMainWindow):
             self.set_baseline_failure(error or "未知错误")
         elif state == "unsupported-schema":
             self._baseline_banner.setStyleSheet(
-                "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+                f"background-color: {style.ERROR_BG}; color: {style.ERROR_TEXT}; padding: 6px 10px;"
             )
             self._baseline_banner.setText(
                 "当前基准文件由不兼容的较新版本创建。\n"
@@ -551,7 +552,7 @@ class MainWindow(QMainWindow):
     def set_baseline_recovered(self, message: str) -> None:
         """Show a persistent warning that the baseline came from backup."""
         self._baseline_banner.setStyleSheet(
-            "background-color: #fff3cd; color: #856404; padding: 6px 10px;"
+            f"background-color: {style.WARNING_BG}; color: {style.WARNING_TEXT}; padding: 6px 10px;"
         )
         self._baseline_banner.setText(message)
         self._baseline_banner.setVisible(True)
@@ -559,7 +560,7 @@ class MainWindow(QMainWindow):
     def set_baseline_failure(self, message: str) -> None:
         """Show an explicit compatibility / load failure banner."""
         self._baseline_banner.setStyleSheet(
-            "background-color: #f8d7da; color: #842029; padding: 6px 10px;"
+            f"background-color: {style.ERROR_BG}; color: {style.ERROR_TEXT}; padding: 6px 10px;"
         )
         self._baseline_banner.setText(
             f"检查基准加载失败：{message}\n请检查 AppData 目录权限或重新配置基准。"

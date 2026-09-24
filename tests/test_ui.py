@@ -1918,3 +1918,34 @@ class TestWindowDisplay:
         assert "文本块：0" in window._summary_label.text()
         assert "文档为空" in window._detail_view.toPlainText()
         window.close()
+
+
+class TestVisualFoundation:
+    """T1: shared presentation tokens change no behavior, only looks."""
+
+    def test_style_applies_to_application_without_behavior_change(self, qapp) -> None:
+        from design_requirement_checker.ui import style
+
+        style.apply_app_style(qapp)
+        window = MainWindow(check_items=(_item(),))
+        assert window.state is UiState.EMPTY
+        assert window._run_button.isEnabled() is False
+        window.close()
+
+    def test_status_badge_colors_cover_known_statuses(self) -> None:
+        from design_requirement_checker.ui import style
+
+        for label in ("已配置", "未配置", "已划除", "待人工核查", "描述有差异"):
+            assert f"color: {style.STATUS_COLORS[label]}" in style.status_badge_style(label)
+        # Unknown statuses fall back to muted — unknown ≠ error.
+        assert f"color: {style.MUTED}" in style.status_badge_style("未知状态")
+
+    def test_mark_primary_is_presentation_only(self, qapp) -> None:
+        from design_requirement_checker.ui import style
+
+        button = QPushButton("保存")
+        style.mark_primary(button)
+        assert button.property("primary") is True
+        # Visual marking never toggles enablement or text.
+        assert button.isEnabled() is True
+        assert button.text() == "保存"
