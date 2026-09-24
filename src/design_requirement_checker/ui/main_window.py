@@ -895,9 +895,19 @@ class MainWindow(QMainWindow):
         """Remove exactly the thread that finished from every ownership
         structure, by identity so stale-generation handlers can't block cleanup.
 
+        ``QThread.finished`` is emitted just *before* the OS thread terminates,
+        so this queued handler can run while the thread is still executing its
+        final instructions. Join that remainder here — bounded to microseconds
+        because ``finished`` was already emitted, unlike an unbounded
+        close-time wait — so an empty ``_active_threads`` guarantees every
+        owned thread has fully terminated and is safe to destroy. Releasing a
+        still-terminating QThread for destruction fast-fails the whole process
+        on Windows (0xC0000409).
+
         After cleanup, if a deferred close is pending and no threads remain,
         schedule a non-reentrant close retry on the UI event loop.
         """
+        thread.wait()
         if thread in self._active_threads:
             self._active_threads.remove(thread)
         # Clean thread_for_generation by identity in case the generation-based

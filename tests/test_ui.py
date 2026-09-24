@@ -449,6 +449,51 @@ class TestBackgroundImport:
         assert window._active_threads == []
         window.close()
 
+    def test_on_thread_finished_joins_thread_before_releasing_ownership(self, qapp) -> None:
+        """``QThread.finished`` is emitted *before* the OS thread terminates,
+        so ownership must only be released once the thread has fully stopped.
+        Otherwise a close/quit that observes an empty ``_active_threads`` can
+        destroy a still-terminating QThread — the Windows fast-fail 0xC0000409
+        the subprocess startup test hit on CI."""
+        from PySide6.QtCore import QThread
+
+        window = MainWindow()
+        thread = QThread()
+        thread.start()
+        window._active_threads = [thread]
+
+        # The thread's event loop is quit from a side Python thread after a
+        # short delay. Without the join in _on_thread_finished, ownership is
+        # released while the thread is still running and isFinished() below
+        # fails deterministically (quit has not even been requested yet).
+        threading.Timer(0.1, thread.quit).start()
+        window._on_thread_finished(thread)
+
+        assert window._active_threads == []
+        assert thread.isFinished()
+        assert not thread.isRunning()
+        window.close()
+
+    def test_verification_release_implies_retired_thread_terminated(self, qapp, tmp_path) -> None:
+        """End-to-end invariant the startup subprocess test relies on: once
+        ``_active_threads`` is empty after a real verification run, the
+        retired thread has fully terminated and is safe to destroy."""
+        document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._on_run_clicked()
+        retired = window._thread
+        assert retired is not None
+
+        assert _process_until(
+            qapp,
+            lambda: not window._active_threads and window.state is UiState.COMPLETED,
+            timeout_ms=4000,
+        )
+        assert retired.isFinished()
+        assert not retired.isRunning()
+        window.close()
+
 
 def _completed_outcome(document: Document) -> VerificationOutcome:
     from design_requirement_checker.matching import verify
