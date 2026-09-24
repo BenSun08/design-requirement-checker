@@ -367,10 +367,27 @@ def _collect_table(
     grid column; a vMerge master is extracted once at its (row, col); vMerge
     continuation cells are skipped, and non-empty continuation content raises
     an explicit warning because Word does not display it.
+
+    Content controls (``w:sdt``) can also wrap an entire table row (Word
+    repeating-section controls) or a single cell. They stay outside the
+    supported scope like body/cell-level content controls and must raise the
+    same explicit warning — their text never vanishes silently.
     """
-    for row_index, tr in enumerate(table._tbl.findall(qn("w:tr"))):
+    row_index = 0
+    for tbl_child in table._tbl:
+        if tbl_child.tag == qn("w:sdt"):
+            warnings.append("content-control-content-excluded")
+            continue
+        if tbl_child.tag != qn("w:tr"):
+            continue
         column_cursor = 0
-        for tc in tr.findall(qn("w:tc")):
+        for row_child in tbl_child:
+            if row_child.tag == qn("w:sdt"):
+                warnings.append("content-control-content-excluded")
+                continue
+            if row_child.tag != qn("w:tc"):
+                continue
+            tc = row_child
             tc_pr = tc.find(qn("w:tcPr"))
             grid_span = 1
             v_merge = None
@@ -422,6 +439,7 @@ def _collect_table(
                 elif child.tag == qn("w:sdt"):
                     warnings.append("content-control-content-excluded")
             column_cursor += grid_span
+        row_index += 1
 
 
 def _collect_body(

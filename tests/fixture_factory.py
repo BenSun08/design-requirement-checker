@@ -59,6 +59,57 @@ def build_table(path: Path) -> Path:
     return path
 
 
+def build_table_content_controls(path: Path) -> Path:
+    """A 2x2 table whose row-2 second cell is wrapped in a ``w:sdt`` content
+    control, plus a whole extra row wrapped in a ``w:sdt`` at the table level
+    (Word repeating-section layout). Word renders both; the declared supported
+    scope excludes them, so they must raise an explicit warning instead of
+    vanishing silently. The unwrapped cells must still be extracted."""
+    doc = Document()
+    doc.add_paragraph("intro")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "VISIBLE-A"
+    table.cell(0, 1).text = "VISIBLE-B"
+    table.cell(1, 0).text = "VISIBLE-C"
+    tr = table.rows[1]._tr
+    tc = tr.tc_lst[1]
+    sdt_cell = _raw(
+        f'<w:sdt {NSDECL}><w:sdtPr><w:id w:val="7"/></w:sdtPr><w:sdtContent>'
+        "<w:tc><w:p><w:r><w:t>SDT-CELL</w:t></w:r></w:p></w:tc></w:sdtContent></w:sdt>"
+    )
+    tr.replace(tc, sdt_cell)
+    table._tbl.append(
+        _raw(
+            f'<w:sdt {NSDECL}><w:sdtPr><w:id w:val="8"/></w:sdtPr><w:sdtContent>'
+            "<w:tr><w:tc><w:p><w:r><w:t>SDT-ROW-A</w:t></w:r></w:p></w:tc>"
+            "<w:tc><w:p><w:r><w:t>SDT-ROW-B</w:t></w:r></w:p></w:tc></w:tr>"
+            "</w:sdtContent></w:sdt>"
+        )
+    )
+    doc.save(path)
+    return path
+
+
+def build_table_long_cell(path: Path) -> Path:
+    """One body paragraph and a 1x2 table whose second cell carries a long
+    multi-paragraph 功能描述 — the real-document pattern where requirement
+    text lives inside table cells and must stay visible in the document
+    inspection view."""
+    doc = Document()
+    doc.add_paragraph("功能要求汇总")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "延时上电"
+    long_line = (
+        "KL30电后延时3s输出，检测到电压小于9V时立即关闭输出；"
+        "具有过压保护功能，过压阈值为16V，过压后延时500ms恢复。"
+    )
+    cell = table.cell(0, 1)
+    cell.text = long_line
+    cell.add_paragraph("输出具有短路保护功能，短路解除后自动恢复。")
+    doc.save(path)
+    return path
+
+
 def build_nested_merged(path: Path) -> Path:
     """3x3 grid with a gridSpan master, a vMerge master, patched hidden continuation
     content, and a nested table inside a cell."""
