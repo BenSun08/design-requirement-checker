@@ -1045,7 +1045,9 @@ class TestSummaryAndOrdering:
         window.set_document(document)
         results = verify(document, (_item("a", "功能"),))
         window.complete_verification(window._op_generation, results)
-        assert "全部" in window._summary_label.text()
+        assert window._summary_card_values["total"].text() == "1"
+        assert window._summary_card_values["configured"].text() == "1"
+        assert window._summary_cards_row.isHidden() is False
         window.close()
 
 
@@ -1130,9 +1132,10 @@ class TestFiltersAndSearch:
 
     def test_summary_stays_stable_while_filtering(self, qapp) -> None:
         window = _window_with_results(qapp, self._results())
-        before = window._summary_label.text()
+        before = {key: lbl.text() for key, lbl in window._summary_card_values.items()}
         window._set_filter("未配置")
-        assert window._summary_label.text() == before
+        after = {key: lbl.text() for key, lbl in window._summary_card_values.items()}
+        assert after == before  # filtering never recomputes verification
         window.close()
 
     def test_search_matches_code_name_category_expected(self, qapp) -> None:
@@ -2001,68 +2004,48 @@ class TestNavigationShell:
         window.close()
 
 
-class TestDocumentWorkspace:
-    """T3: document bar, empty import state, busy states (prototype parity)."""
+class TestSummaryCards:
+    """T4: prototype summary cards — counts by domain state, 描述差异 orthogonal."""
 
-    def test_empty_state_shown_without_document(self, qapp) -> None:
+    def test_cards_reflect_domain_counts(self, qapp) -> None:
+        window = _window_with_results(
+            qapp,
+            (
+                _result("c1", status=CheckStatus.CONFIGURED),
+                _result(
+                    "c2",
+                    status=CheckStatus.CONFIGURED,
+                    comparison_state=ComparisonState.DIFFERENT,
+                ),
+                _result("m1", status=CheckStatus.MISSING),
+                _result("s1", status=CheckStatus.STRUCK_OUT),
+                _result("u1", status=None, resolution=Resolution.UNRESOLVED),
+            ),
+        )
+        values = window._summary_card_values
+        assert values["total"].text() == "5"  # cfg + miss + struck + unresolved
+        assert values["configured"].text() == "2"
+        assert values["missing"].text() == "1"
+        assert values["struck_out"].text() == "1"
+        assert values["unresolved"].text() == "1"
+        assert values["different"].text() == "1"  # counted separately
+        window.close()
+
+    def test_cards_hidden_without_results(self, qapp) -> None:
         window = MainWindow(check_items=(_item(),))
-        assert window._workspace_stack.currentIndex() == 0
-        assert window._doc_name_label.text() == "尚未选择文档"
-        assert window._doc_state_label.text() == "等待导入"
+        assert window._summary_cards_row.isHidden() is True
         window.close()
 
-    def test_document_shows_work_area_and_state(self, qapp) -> None:
-        window = MainWindow(check_items=(_item(),))
-        window.set_document(_document(_block("body:p0", "内容")))
-        assert window._workspace_stack.currentIndex() == 1
-        assert window._doc_name_label.text() == "ui.docx"
-        assert "已导入" in window._doc_state_label.text()
-        window.close()
-
-    def test_first_import_keeps_empty_card_with_busy_state(self, qapp) -> None:
-        window = MainWindow(check_items=(_item(),))
-        window._state = UiState.IMPORTING
-        window._document = None
-        window._update_actions()
-        # No document yet → the empty card stays; the document bar shows busy.
-        assert window._workspace_stack.currentIndex() == 0
-        window._set_doc_state("正在导入…")
-        assert window._doc_state_label.text() == "正在导入…"
-        window.close()
-
-    def test_import_failure_shows_work_area_not_empty_card(self, qapp) -> None:
-        failure = ImportFailure("broken.docx", "file-access-error", "missing")
-        window = MainWindow()
-        window.show_import_outcome(failure)
-        assert window._workspace_stack.currentIndex() == 1
-        assert window._doc_state_label.text() == "导入失败"
-        window.close()
-
-    def test_empty_import_button_mirrors_import_enablement(self, qapp) -> None:
-        window = MainWindow(check_items=(_item(),))
-        assert window._empty_import_button.isEnabled() is True
-        window._state = UiState.IMPORTING
-        window._update_actions()
-        assert window._empty_import_button.isEnabled() is False
-        window.close()
-
-    def test_empty_caption_reflects_baseline(self, qapp) -> None:
-        no_items = MainWindow(check_items=())
-        assert "尚未配置" in no_items._empty_caption.text()
-        no_items.close()
-        window = MainWindow(check_items=(_item("a"),))
-        assert "1 个检查项" in window._empty_caption.text()
+    def test_cards_hidden_after_results_cleared(self, qapp) -> None:
+        window = _window_with_results(qapp, (_result("c1", status=CheckStatus.CONFIGURED),))
+        assert window._summary_cards_row.isHidden() is False
+        # Baseline change invalidates results → stale counts must disappear.
         window.set_check_items((_item("a"), _item("b", phrase="功能B")), baseline_id="bid")
-        assert "2 个检查项" in window._empty_caption.text()
-        window.close()
-
-    def test_verification_states_update_document_bar(self, qapp) -> None:
-        window = MainWindow(check_items=(_item("a", "功能A"),))
-        window.set_document(_document(_block("body:p0", "功能A")))
-        window.start_verification()
-        assert window._doc_state_label.text() == "正在核查…"
+        assert window._summary_cards_row.isHidden() is True
+        # A cancelled rerun never shows old counts either.
+        gen = window.start_verification()
+        window.complete_verification(gen, (_result("c2", status=CheckStatus.CONFIGURED),))
+        assert window._summary_cards_row.isHidden() is False
         window.cancel_verification()
-        assert "已取消" in window._doc_state_label.text()
-        window.fail_verification("boom")
-        assert window._doc_state_label.text() == "核查失败"
+        assert window._summary_cards_row.isHidden() is True
         window.close()

@@ -589,18 +589,67 @@ class MainWindow(QMainWindow):
             return f"{len(self._check_items)} 个检查项 · 本地核查"
         return "尚未配置检查基准 — 切换到 “检查项管理” 新增"
 
+    def _build_summary_cards(self) -> QWidget:
+        """Prototype .summary: one white bar of count cards + orthogonality note.
+
+        检查项总数 = 已配置 + 未配置 + 已划除 + 待人工核查; 描述差异 is
+        counted separately and never folded into the total (constitution §5).
+        """
+        bar = QWidget()
+        bar.setObjectName("summaryBar")
+        bar.setStyleSheet(f"background: {style.CARD}; border: 1px solid {style.BORDER};")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 10, 12, 10)
+        row.setSpacing(24)
+        self._summary_card_values: dict[str, QLabel] = {}
+        stats = (
+            ("total", "检查项总数", style.TEXT),
+            ("configured", "已配置", style.CONFIGURED),
+            ("missing", "未配置", style.MISSING),
+            ("struck_out", "已划除", style.STRUCK_OUT),
+            ("unresolved", "待人工核查", style.UNRESOLVED),
+            ("different", "描述差异", style.DIFFERENCE),
+        )
+        for key, caption_text, color in stats:
+            stat = QWidget()
+            stat_row = QHBoxLayout(stat)
+            stat_row.setContentsMargins(0, 0, 0, 0)
+            stat_row.setSpacing(6)
+            value = QLabel("0")
+            value_font = value.font()
+            value_font.setBold(True)
+            value_font.setPointSizeF(13)
+            value.setFont(value_font)
+            value.setStyleSheet(f"color: {color};")
+            caption = QLabel(caption_text)
+            caption.setStyleSheet(f"color: {style.MUTED};")
+            stat_row.addWidget(value)
+            stat_row.addWidget(caption)
+            row.addWidget(stat)
+            self._summary_card_values[key] = value
+        row.addStretch()
+        note = QLabel("描述差异与配置状态独立统计")
+        note.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        row.addWidget(note)
+        bar.setVisible(False)
+        return bar
+
     def _build_work_area(self) -> QWidget:
-        """Filters, search and the result/detail splitter."""
+        """Summary cards, filters, search and the result/detail splitter."""
         area = QWidget()
         layout = QVBoxLayout(area)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
+        # Result summary cards (prototype .summary) — visible with results.
+        self._summary_cards_row = self._build_summary_cards()
+        layout.addWidget(self._summary_cards_row)
+
         # Filter buttons + search.
         self._current_filter = "全部"
         self._filter_buttons: dict[str, QPushButton] = {}
         filter_row = QHBoxLayout()
-        for name in ("全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"):
+        for name in ("全部", "仅异常", "已配置", "未配置", "已划除", "待人工核查"):
             btn = QPushButton(name)
             btn.setCheckable(True)
             btn.setChecked(name == "全部")
@@ -707,6 +756,7 @@ class MainWindow(QMainWindow):
         self._results = ()
         self._state = UiState.READY
         self._result_list.clear()
+        self._update_summary()
         self._show_document(document)
         self._update_actions()
 
@@ -715,6 +765,7 @@ class MainWindow(QMainWindow):
         self._op_generation += 1
         self._state = UiState.VERIFYING
         self._results = ()
+        self._update_summary()
         self._set_doc_state("正在核查…")
         self._update_actions()
         return self._op_generation
@@ -1016,19 +1067,34 @@ class MainWindow(QMainWindow):
         return "".join(parts)
 
     def _update_summary(self) -> None:
+        """Refresh the summary cards; hide them whenever results are cleared.
+
+        Called after every results transition — completion shows current
+        counts, and every path that empties ``_results`` (new run,
+        cancellation, failure, baseline change, new document, import
+        failure) must hide stale counts: a stale background completion may
+        never restore them.
+        """
         if not self._results:
+            self._summary_cards_row.setVisible(False)
             return
         s = self._compute_summary(self._results)
-        self._summary_label.setText(
-            f"全部 {s.total} · 已配置 {s.configured} · 未配置 {s.missing}"
-            f" · 已划除 {s.struck_out} · 待人工核查 {s.unresolved}"
-            f" · 描述有差异 {s.different}"
-        )
+        for key, value in (
+            ("total", s.total),
+            ("configured", s.configured),
+            ("missing", s.missing),
+            ("struck_out", s.struck_out),
+            ("unresolved", s.unresolved),
+            ("different", s.different),
+        ):
+            self._summary_card_values[key].setText(str(value))
+        self._summary_cards_row.setVisible(True)
 
     def cancel_verification(self) -> None:
         """Mark the run cancelled; results stay empty, never completed."""
         self._state = UiState.CANCELLED
         self._results = ()
+        self._update_summary()
         self._set_doc_state("已取消核查 — 可重新核查")
         self._update_actions()
 
@@ -1036,6 +1102,7 @@ class MainWindow(QMainWindow):
         """Mark the run failed; results stay empty, never completed."""
         self._state = UiState.FAILED
         self._results = ()
+        self._update_summary()
         self._set_doc_state("核查失败")
         self.statusBar().showMessage(f"核查失败：{message}")
         self._update_actions()
@@ -1086,6 +1153,7 @@ class MainWindow(QMainWindow):
         generation = self._op_generation
         self._state = UiState.IMPORTING
         self._results = ()
+        self._update_summary()
         self._progress.setVisible(True)
         self._set_doc_state("正在导入…")
         self.statusBar().showMessage("正在读取文档…")
@@ -1344,6 +1412,7 @@ class MainWindow(QMainWindow):
         self._nav_tabs.setTabText(1, self._management_tab_text())
         self._empty_caption.setText(self._empty_state_caption())
         self._results = ()
+        self._update_summary()
         self._result_list.clear()
         self._detail_view.clear()
         if self._document is not None:
@@ -1382,6 +1451,7 @@ class MainWindow(QMainWindow):
             self._state = UiState.FAILED
             self._document = None
             self._results = ()
+            self._update_summary()
             self._set_doc_state("导入失败")
             self._summary_label.setText("导入失败：出现意外错误")
             self._summary_label.setVisible(True)
@@ -1419,6 +1489,7 @@ class MainWindow(QMainWindow):
     def _show_failure(self, failure: ImportFailure) -> None:
         self._document = None
         self._results = ()
+        self._update_summary()
         self._state = UiState.FAILED
         self._set_doc_state("导入失败")
         self._summary_label.setText(f"导入失败：{failure.filename}")

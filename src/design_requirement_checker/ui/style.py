@@ -110,6 +110,12 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: #edf3fb; border-color: #7f9bbd; }}
 QPushButton:disabled {{ color: {MUTED}; background: {CARD}; }}
+QPushButton:checked {{
+    background: {PRIMARY_TINT};
+    border-color: #a8bedc;
+    color: #194c8e;
+    font-weight: 600;
+}}
 QPushButton[primary="true"] {{
     background: {PRIMARY};
     color: {CARD};
