@@ -2049,3 +2049,129 @@ class TestSummaryCards:
         window.cancel_verification()
         assert window._summary_cards_row.isHidden() is True
         window.close()
+
+
+class TestResultReviewWorkspace:
+    """T5 structural parity: prototype .workspace-grid / .result-row / .detail."""
+
+    def test_list_pane_has_heading_and_visible_count(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        window = _window_with_results(qapp, self._three_results())
+        pane_title = window.findChild(QLabel, "paneTitle")
+        assert pane_title is not None and pane_title.text() == "检查项"
+        assert window._visible_count_label.text() == "显示 3 / 3"
+        window.close()
+
+    def test_rows_are_custom_widgets_with_code_name_and_status(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QLabel
+
+        window = _window_with_results(qapp, self._three_results())
+        for i in range(window._result_list.count()):
+            item = window._result_list.item(i)
+            row = window._result_list.itemWidget(item)
+            assert row is not None, "every result row must render a custom widget"
+            labels = [lbl.text() for lbl in row.findChildren(QLabel)]
+            result = item.data(Qt.ItemDataRole.UserRole)
+            assert any(result.check_item.code in text for text in labels)
+            assert result.check_item.name in labels
+            assert any(text in labels for text in ("已配置", "未配置", "已划除", "待人工核查"))
+        window.close()
+
+    def test_difference_rows_carry_hint_label(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        diff = _result_with_evidence(
+            "d",
+            status=CheckStatus.CONFIGURED,
+            comparison_state=ComparisonState.DIFFERENT,
+            evidence=(_evidence(),),
+        )
+        window = _window_with_results(qapp, (diff,))
+        row = window._result_list.itemWidget(window._result_list.item(0))
+        assert "描述有差异" in [lbl.text() for lbl in row.findChildren(QLabel)]
+        window.close()
+
+    def test_first_visible_row_auto_selected(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+
+        results = self._three_results()
+        window = _window_with_results(qapp, results)
+        # Ordering puts 未配置 first; the detail pane must show a current
+        # result immediately (prototype renderResults selection rule).
+        assert window._result_list.currentRow() == 0
+        selected = window._result_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        assert selected.status is CheckStatus.MISSING
+        assert "未配置" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_surviving_selection_kept_on_filter_change(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+
+        results = self._three_results()
+        window = _window_with_results(qapp, results)
+        # Select the struck-out result (last row), then narrow the filter so
+        # it is still visible: the selection must survive repopulation.
+        window._result_list.setCurrentRow(window._result_list.count() - 1)
+        window._set_filter("已划除")
+        assert window._result_list.count() == 1
+        selected = window._result_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        assert selected.status is CheckStatus.STRUCK_OUT
+        window.close()
+
+    def test_selection_bar_marks_current_row(self, qapp) -> None:
+        from PySide6.QtWidgets import QWidget
+
+        window = _window_with_results(qapp, self._three_results())
+        window._result_list.setCurrentRow(0)
+        current_item = window._result_list.currentItem()
+        row = window._result_list.itemWidget(current_item)
+        bar = row.findChild(QWidget, "selectionBar")
+        assert bar is not None
+        assert "transparent" not in bar.styleSheet()
+        window._result_list.setCurrentRow(1)
+        assert "transparent" in bar.styleSheet()
+        window.close()
+
+    def test_detail_shows_comparison_block_headings(self, qapp) -> None:
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),))
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "预期要求 · 检查基准" in text
+        assert "实际内容 · 检测文档" in text
+        assert "匹配证据" in text
+        window.close()
+
+    def test_detail_context_section_is_prev_current_next(self, qapp) -> None:
+        document = Document(
+            document_id="doc-ui",
+            filename="ui.docx",
+            content_fingerprint="fp",
+            blocks=(
+                _block("body:p0", "前文段落"),
+                _block("body:p1", "门控延时功能已配置"),
+                _block("body:p2", "后文段落"),
+            ),
+            coverage=Coverage.COMPLETE,
+        )
+        ev = _evidence(block_id="body:p1", requirement_text="门控延时")
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev,))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "原文上下文" in text
+        assert "上一段" in text
+        assert "当前 · 匹配位置" in text
+        assert "下一段" in text
+        window.close()
+
+    @staticmethod
+    def _three_results():
+        return (
+            _result("c", status=CheckStatus.CONFIGURED),
+            _result("m", status=CheckStatus.MISSING),
+            _result("s", status=CheckStatus.STRUCK_OUT),
+        )

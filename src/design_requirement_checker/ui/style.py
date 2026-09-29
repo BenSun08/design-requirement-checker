@@ -66,6 +66,10 @@ INFO_BORDER = "#c4d3e6"
 DIFF_DELETE = "#842029"
 TABLE_CELL_TINT = "#eef4fb"
 
+# Result review workspace (prototype .workspace-grid / .result-row / .context).
+ROW_BORDER = "#e4e9ef"
+CONTEXT_CURRENT = "#edf3fc"
+
 # --- spacing (prototype paddings/gaps, rounded to Qt-friendly values) -----
 
 SPACING = 8
@@ -135,6 +139,22 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {PRIMARY}; }}
 QSplitter::handle {{ background: {BORDER}; }}
+#workspaceGrid {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+}}
+#listPane {{ border-right: 1px solid {BORDER}; }}
+#paneHeading {{
+    background: {PANEL_HEADING};
+    border-bottom: 1px solid {BORDER};
+}}
+QListWidget {{
+    background: transparent;
+    border: 0;
+    outline: 0;
+}}
+QListWidget::item {{ border-bottom: 1px solid {ROW_BORDER}; }}
+QListWidget::item:selected {{ background: {SELECTED_ROW}; }}
 QTableWidget {{
     background: {CARD};
     border: 1px solid {BORDER};

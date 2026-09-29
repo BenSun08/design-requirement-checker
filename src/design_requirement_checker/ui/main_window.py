@@ -664,17 +664,48 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(self._search_input)
         layout.addLayout(filter_row)
 
-        # Result list (left) + detail (right).
+        # Result list (left) + detail (right) inside one bordered review
+        # card (prototype .workspace-grid). The splitter keeps both panes
+        # user-resizable — a production affordance the browser grid lacks.
         self._splitter = QSplitter()
+        self._splitter.setObjectName("workspaceGrid")
+        list_pane = QWidget()
+        list_pane.setObjectName("listPane")
+        list_layout = QVBoxLayout(list_pane)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(0)
+        pane_heading = QWidget()
+        pane_heading.setObjectName("paneHeading")
+        heading_row = QHBoxLayout(pane_heading)
+        heading_row.setContentsMargins(16, 10, 16, 10)
+        pane_title = QLabel("检查项")
+        pane_title.setObjectName("paneTitle")
+        pane_title.setStyleSheet(f"color: {style.MUTED}; font-size: 12px; font-weight: 600;")
+        self._visible_count_label = QLabel("")
+        self._visible_count_label.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        heading_row.addWidget(pane_title)
+        heading_row.addStretch()
+        heading_row.addWidget(self._visible_count_label)
+        list_layout.addWidget(pane_heading)
         self._result_list = QListWidget()
-        self._result_list.setMinimumWidth(240)
+        self._result_list.setMinimumWidth(300)
+        list_layout.addWidget(self._result_list, 1)
+
+        detail_pane = QWidget()
+        detail_layout = QVBoxLayout(detail_pane)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
         self._detail_view = QTextBrowser()
         self._detail_view.setOpenExternalLinks(False)
+        self._detail_view.document().setDocumentMargin(20)
         self._detail_view.anchorClicked.connect(self._on_evidence_anchor)
-        self._splitter.addWidget(self._result_list)
-        self._splitter.addWidget(self._detail_view)
-        self._splitter.setStretchFactor(0, 1)
+        detail_layout.addWidget(self._detail_view, 1)
+
+        self._splitter.addWidget(list_pane)
+        self._splitter.addWidget(detail_pane)
+        self._splitter.setStretchFactor(0, 2)
         self._splitter.setStretchFactor(1, 3)
+        self._splitter.setSizes((500, 750))
         layout.addWidget(self._splitter, 1)
         self._result_list.currentItemChanged.connect(self._on_result_selected)
         return area
@@ -756,6 +787,7 @@ class MainWindow(QMainWindow):
         self._results = ()
         self._state = UiState.READY
         self._result_list.clear()
+        self._visible_count_label.setText("")
         self._update_summary()
         self._show_document(document)
         self._update_actions()
@@ -868,12 +900,27 @@ class MainWindow(QMainWindow):
         return tuple(sorted(results, key=_result_group))
 
     def _populate_results(self) -> None:
+        """Rebuild the visible result rows; never recomputes verification.
+
+        Prototype .result-list behavior: the still-visible selection is kept
+        when it survives a filter/search change, otherwise the first visible
+        row is selected so the detail pane always shows a current result.
+        """
+        previous = self._result_list.currentItem()
+        previous_result = previous.data(Qt.ItemDataRole.UserRole) if previous is not None else None
         self._result_list.clear()
         visible = self._filtered_results()
+        self._visible_count_label.setText(f"显示 {len(visible)} / {len(self._results)}")
         if not visible:
             self._result_list.addItem("无匹配结果")
-            self._detail_view.clear()
+            self._detail_view.setHtml(
+                f'<p style="color: {style.MUTED}">没有符合条件的检查项。</p>'
+                f'<p style="color: {style.MUTED}">调整筛选或搜索词可重新显示结果。</p>'
+            )
             return
+        keep_row: int | None = None
+        if isinstance(previous_result, CheckResult):
+            keep_row = next((i for i, r in enumerate(visible) if r is previous_result), None)
         for result in visible:
             item = result.check_item
             parts = [item.code, item.name, self._status_text(result)]
@@ -883,6 +930,71 @@ class MainWindow(QMainWindow):
             list_item = QListWidgetItem(label)
             list_item.setData(Qt.ItemDataRole.UserRole, result)
             self._result_list.addItem(list_item)
+            row = self._build_result_row(result)
+            list_item.setSizeHint(row.sizeHint())
+            self._result_list.setItemWidget(list_item, row)
+        # Auto-select: keep the still-visible selection, else the first row.
+        self._result_list.setCurrentRow(keep_row if keep_row is not None else 0)
+
+    def _build_result_row(self, result: CheckResult) -> QWidget:
+        """Prototype .result-row: code·category / bold name / difference hint
+        on the left, colored status on the right.
+
+        The QListWidgetItem keeps carrying the same plain text (code · name ·
+        status · 描述有差异) for accessibility and keyboard navigation; this
+        widget only changes how the row is presented.
+        """
+        item = result.check_item
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+        # 3px selection bar (prototype .result-row.selected inset); styled
+        # on selection changes via _style_row_selection.
+        bar = QWidget()
+        bar.setObjectName("selectionBar")
+        bar.setFixedWidth(3)
+        bar.setStyleSheet("background: transparent;")
+        layout.addWidget(bar, 0, Qt.AlignmentFlag.AlignTop)
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        code_text = item.code if not item.category else f"{item.code} · {item.category}"
+        code_label = QLabel(code_text)
+        code_label.setStyleSheet(f"color: {style.MUTED}; font-size: 11px;")
+        name_label = QLabel(item.name)
+        name_font = name_label.font()
+        name_font.setBold(True)
+        name_label.setFont(name_font)
+        left.addWidget(code_label)
+        left.addWidget(name_label)
+        if result.comparison_state is ComparisonState.DIFFERENT:
+            diff_label = QLabel(_COMPARISON_LABELS[ComparisonState.DIFFERENT])
+            diff_label.setStyleSheet(
+                f"color: {style.DIFFERENCE}; font-size: 12px; font-weight: 600;"
+            )
+            left.addWidget(diff_label)
+        layout.addLayout(left, 1)
+        status_text = self._status_text(result)
+        status_label = QLabel(status_text)
+        status_label.setStyleSheet(style.status_badge_style(status_text))
+        layout.addWidget(status_label, 0, Qt.AlignmentFlag.AlignTop)
+        return row
+
+    def _style_row_selection(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        """Move the prototype's blue selection bar between rows (visual only)."""
+        for item, selected in ((previous, False), (current, True)):
+            if item is None:
+                continue
+            row = self._result_list.itemWidget(item)
+            if row is None:
+                continue
+            bar = row.findChild(QWidget, "selectionBar")
+            if bar is not None:
+                bar.setStyleSheet(
+                    f"background: {style.PRIMARY};" if selected else "background: transparent;"
+                )
 
     def _set_filter(self, name: str) -> None:
         self._current_filter = name
@@ -931,10 +1043,11 @@ class MainWindow(QMainWindow):
     # --- result detail ------------------------------------------------------
 
     def _on_result_selected(
-        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
     ) -> None:
         if self._close_requested or current is None:
             return
+        self._style_row_selection(current, previous)
         result = current.data(Qt.ItemDataRole.UserRole)
         if isinstance(result, CheckResult):
             self._show_detail(result)
@@ -969,6 +1082,15 @@ class MainWindow(QMainWindow):
             self._select_evidence(int(value))
 
     def _render_detail(self) -> None:
+        """Render the selected result as the prototype .detail-pane.
+
+        Structure: detail-title (name/code/category + status), metadata line
+        (匹配方式 / 证据数 / 描述比较), the two-column .comparison block
+        (预期要求 vs 实际内容), an amber diff banner for 描述有差异, the
+        comparison/review reason lines, the .evidence section and the
+        .context prev/current/next block. Every displayed value still comes
+        from the domain result — this method only changes presentation.
+        """
         result = self._detail_result
         if result is None:
             return
@@ -982,16 +1104,40 @@ class MainWindow(QMainWindow):
             _MATCH_TYPE_LABELS.get(selected.match_type, "") if selected is not None else ""
         )
         comparison_text = _COMPARISON_LABELS.get(result.comparison_state, "未比较描述")
+        status_text = self._status_text(result)
+        status_color = style.STATUS_COLORS.get(status_text, style.MUTED)
 
+        # .detail-title — name and code/category on the left, status right.
+        code_line = html.escape(item.code)
+        if item.category:
+            code_line += f" / {html.escape(item.category)}"
         parts: list[str] = [
-            f"<h3>{html.escape(item.code)} · {html.escape(item.name)}</h3>",
-            f"<p>类别：{html.escape(item.category)}</p>",
-            f"<p>状态：{self._status_text(result)}</p>",
-            f"<p>描述比较：{comparison_text}</p>",
-            f"<p>期望描述：{html.escape(item.expected_description)}</p>",
+            '<table width="100%" cellspacing="0" cellpadding="0" border="0"><tr>'
+            f'<td valign="top"><h3>{html.escape(item.name)}</h3>'
+            f'<p style="color: {style.MUTED}; font-size: 12px">{code_line}</p></td>'
+            f'<td width="1" align="right" valign="top">'
+            "<p><b>"
+            f'<span style="color: {status_color}; font-size: 13px">{status_text}</span>'
+            "</b></p>"
+            "</td></tr></table>"
         ]
-        if result.status is CheckStatus.MISSING:
-            parts.append("<p>在已检查范围内未找到匹配证据</p>")
+
+        # .metadata — one muted line; only the pieces that apply to this
+        # result (a MISSING result shows neither 匹配方式 nor 证据数).
+        meta: list[str] = []
+        if match_method:
+            meta.append(f"匹配方式 <b>{match_method}</b>")
+        if evidence:
+            meta.append(f"证据 <b>{len(evidence)} 处</b>")
+        meta.append(f"描述比较 <b>{comparison_text}</b>")
+        parts.append(f'<p style="color: {style.MUTED}; font-size: 12px">{" · ".join(meta)}</p>')
+
+        # .comparison — expected vs actual side by side.
+        expected_cell = (
+            f'<p style="color: {style.MUTED}; font-size: 12px"><b>预期要求 · 检查基准</b></p>'
+            f"<p>期望描述：{html.escape(item.expected_description)}</p>"
+        )
+        actual_raw = ""
         if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
             # DIFFERENT results must explain themselves: the raw readable
             # actual text plus a where-do-they-differ rendering. The raw
@@ -999,35 +1145,70 @@ class MainWindow(QMainWindow):
             # comparison form (presentation only; matching is unchanged).
             req_start, req_end = selected.requirement_span
             actual_raw = selected.raw_text[req_start:req_end]
-            parts.append(f"<p>实际描述：{html.escape(actual_raw)}</p>")
-            parts.append(
-                f"<p>差异详情：{_description_diff_html(item.expected_description, actual_raw)}</p>"
+            actual_body = f"<p>实际描述：{html.escape(actual_raw)}</p>"
+        elif result.status is CheckStatus.MISSING:
+            actual_body = (
+                "<p>在已检查范围内未找到匹配证据。</p><p>请人工确认文档是否使用了其他表述。</p>"
             )
         elif actual_text:
             if result.status is CheckStatus.STRUCK_OUT:
-                parts.append(f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>")
+                actual_body = f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>"
             else:
-                parts.append(f"<p>实际需求：{html.escape(actual_text)}</p>")
-        if match_method:
-            parts.append(f"<p>匹配方式：{match_method}</p>")
-        if selected is not None:
-            parts.append(f"<p>位置：{html.escape(format_location(selected.location))}</p>")
+                actual_body = f"<p>实际需求：{html.escape(actual_text)}</p>"
+        else:
+            actual_body = "<p>无证据内容可显示。</p>"
+        actual_cell = (
+            f'<p style="color: {style.MUTED}; font-size: 12px"><b>实际内容 · 检测文档</b></p>'
+            f"{actual_body}"
+        )
+        parts.append(
+            '<table width="100%" cellspacing="0" cellpadding="10" border="1"><tr>'
+            f'<td width="50%" valign="top">{expected_cell}</td>'
+            f'<td width="50%" valign="top" bgcolor="{style.PANEL_TINT}">{actual_cell}</td>'
+            "</tr></table>"
+        )
+
+        # .diff-banner — where the two descriptions differ, in place.
+        if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
+            parts.append(
+                '<table width="100%" cellspacing="0" cellpadding="10" border="0"><tr>'
+                f'<td bgcolor="{style.WARNING_BG}"><b>差异详情：</b>'
+                f"{_description_diff_html(item.expected_description, actual_raw)}"
+                "<br>功能已出现但描述不同，请人工核实订单要求。</td></tr></table>"
+            )
+
         if result.comparison_reason:
             reason_text = _COMPARISON_REASON_LABELS.get(
                 result.comparison_reason, result.comparison_reason
             )
-            parts.append(f"<p>比较原因：{html.escape(reason_text)}</p>")
+            parts.append(
+                f'<p style="color: {style.MUTED}">比较原因：{html.escape(reason_text)}</p>'
+            )
         if result.review_reasons:
             reasons = "".join(
                 f"<li>{html.escape(_REASON_LABELS.get(r, r))}</li>" for r in result.review_reasons
             )
             parts.append(f"<p>核查原因：</p><ul>{reasons}</ul>")
 
-        if len(evidence) > 1:
-            links = " ".join(
-                f'<a href="evidence:{i}">证据 {i + 1}</a>' for i in range(len(evidence))
+        # .evidence — occurrence links, position, and the review caveat.
+        parts.append("<p><b>匹配证据</b></p>")
+        if result.status is CheckStatus.MISSING:
+            parts.append(
+                "<p>未配置是检测结果，不代表已确认无需配置。</p>"
+                f'<p style="color: {style.MUTED}">没有匹配证据，因此不显示虚构的原文位置。</p>'
             )
-            parts.append(f"<p>证据：{links}</p>")
+        elif evidence:
+            if len(evidence) > 1:
+                links = " ".join(
+                    f'<a href="evidence:{i}">证据 {i + 1}</a>' for i in range(len(evidence))
+                )
+                parts.append(f"<p>{links}</p>")
+            if selected is not None:
+                parts.append(f"<p>位置：{html.escape(format_location(selected.location))}</p>")
+            parts.append(
+                f'<p style="color: {style.MUTED}; font-size: 12px">'
+                "匹配方式不等于工程结论，请人工核实。</p>"
+            )
 
         if selected is not None and result.status is not CheckStatus.MISSING:
             parts.append(self._source_context_html(selected))
@@ -1035,7 +1216,13 @@ class MainWindow(QMainWindow):
         self._detail_view.setHtml("".join(parts))
 
     def _source_context_html(self, evidence: MatchEvidence) -> str:
-        """Rebuild prev/current/next block context from the current document."""
+        """Rebuild the prototype .context block from the current document.
+
+        Three bordered rows — 上一段 (muted), 当前 (tinted, requirement span
+        highlighted) and 下一段 (muted) — under a 原文上下文 heading that
+        repeats the caveat: this is a reconstructed excerpt, not a Word page
+        rendering.
+        """
         if self._document is None:
             return ""
         blocks = self._document.blocks
@@ -1046,24 +1233,42 @@ class MainWindow(QMainWindow):
         if idx is None:
             return ""
         span = evidence.requirement_span
-        parts = ["<hr><p>源文本上下文（重建文本，非 Word 页面渲染）</p>"]
+        current = blocks[idx]
+        parts = [
+            "<p><b>原文上下文</b>　"
+            f'<span style="color: {style.MUTED}; font-size: 12px">'
+            f"{html.escape(format_location(current.location))} · 重建摘录，非 Word 页面</span></p>"
+        ]
+        rows: list[str] = []
         if idx > 0:
             prev = blocks[idx - 1]
-            parts.append(f"<p><i>上一段：{html.escape(format_location(prev.location))}</i></p>")
-            parts.append(
-                f'<p style="white-space: pre-wrap">{_format_block_with_highlight(prev, None)}</p>'
+            rows.append(
+                f"<td><p"
+                f' style="color: {style.MUTED}; font-size: 11px">上一段 · '
+                f"{html.escape(format_location(prev.location))}</p>"
+                f'<p style="white-space: pre-wrap">'
+                f"{_format_block_with_highlight(prev, None)}</p></td>"
             )
-        current = blocks[idx]
-        parts.append(f"<p><b>当前：{html.escape(format_location(current.location))}</b></p>")
-        parts.append(
-            f'<p style="white-space: pre-wrap">{_format_block_with_highlight(current, span)}</p>'
+        rows.append(
+            f'<td bgcolor="{style.CONTEXT_CURRENT}">'
+            f'<p style="color: {style.MUTED}; font-size: 11px">当前 · 匹配位置</p>'
+            f'<p style="white-space: pre-wrap">'
+            f"{_format_block_with_highlight(current, span)}</p></td>"
         )
         if idx < len(blocks) - 1:
             nxt = blocks[idx + 1]
-            parts.append(f"<p><i>下一段：{html.escape(format_location(nxt.location))}</i></p>")
-            parts.append(
-                f'<p style="white-space: pre-wrap">{_format_block_with_highlight(nxt, None)}</p>'
+            rows.append(
+                f"<td><p"
+                f' style="color: {style.MUTED}; font-size: 11px">下一段 · '
+                f"{html.escape(format_location(nxt.location))}</p>"
+                f'<p style="white-space: pre-wrap">'
+                f"{_format_block_with_highlight(nxt, None)}</p></td>"
             )
+        parts.append(
+            '<table width="100%" cellspacing="0" cellpadding="10" border="1"><tr>'
+            + "</tr><tr>".join(rows)
+            + "</tr></table>"
+        )
         return "".join(parts)
 
     def _update_summary(self) -> None:
@@ -1414,6 +1619,7 @@ class MainWindow(QMainWindow):
         self._results = ()
         self._update_summary()
         self._result_list.clear()
+        self._visible_count_label.setText("")
         self._detail_view.clear()
         if self._document is not None:
             self._state = UiState.READY
