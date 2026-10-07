@@ -58,6 +58,7 @@ WARNING_BG = "#fff5dc"
 WARNING_BORDER = "#dac28b"
 WARNING_TEXT = "#674912"
 ERROR_BG = "#f8d7da"
+ERROR_BORDER = "#f5c6cb"
 ERROR_TEXT = "#842029"
 INFO_BG = "#eaf0f8"
 INFO_BORDER = "#c4d3e6"
@@ -180,7 +181,31 @@ QTabBar::tab {{
 QTabBar::tab:hover {{ color: {FOCUS_RING}; }}
 QTabBar::tab:selected {{ color: {PRIMARY}; border-bottom: 3px solid {PRIMARY}; font-weight: 600; }}
 QTabBar::tab:disabled {{ color: #9aa7b6; }}
+QStatusBar {{
+    background: {CARD};
+    border-top: 1px solid {BORDER};
+    color: {MUTED};
+    font-size: 12px;
+}}
+QStatusBar::item {{ border: 0; }}
+QStatusBar QLabel {{ color: {MUTED}; font-size: 12px; }}
 """
+
+
+def banner_stylesheet(*, error: bool = False) -> str:
+    """Shared notice look (prototype ``#notice``): tinted surface, border,
+    consistent padding. One owner so banners and the coverage warning
+    never drift apart visually. ``error=True`` selects the error surface.
+    """
+    if error:
+        return (
+            f"background: {ERROR_BG}; color: {ERROR_TEXT};"
+            f"border: 1px solid {ERROR_BORDER}; border-radius: 4px; padding: 8px 12px;"
+        )
+    return (
+        f"background: {WARNING_BG}; color: {WARNING_TEXT};"
+        f"border: 1px solid {WARNING_BORDER}; border-radius: 4px; padding: 8px 12px;"
+    )
 
 
 def apply_app_style(app: QApplication) -> None:

@@ -2177,3 +2177,101 @@ class TestResultReviewWorkspace:
             _result("m", status=CheckStatus.MISSING),
             _result("s", status=CheckStatus.STRUCK_OUT),
         )
+
+
+class TestFooterAndResponsiveChecks:
+    """T8 — persistent footer disclaimer plus long-content / bounded-scale
+    robustness. Structural assertions only: no pixel or golden values, so
+    nothing here can break under Windows DPI scaling."""
+
+    def test_footer_disclaimer_is_a_persistent_status_note(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        window = MainWindow(check_items=(_item(),))
+        notes = [w.text() for w in window.statusBar().findChildren(QLabel)]
+        assert "工程师负责最终判断 · 已配置 ≠ 描述符合要求" in notes
+        # The footer note is permanent — a transient message never removes it.
+        window.statusBar().showMessage("核查完成")
+        notes = [w.text() for w in window.statusBar().findChildren(QLabel)]
+        assert "工程师负责最终判断 · 已配置 ≠ 描述符合要求" in notes
+        assert window.statusBar().currentMessage() == "核查完成"
+        window.close()
+
+    def test_minimum_size_fits_1024x600_and_default_is_1440x900(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        assert window.minimumSize().width() <= 1024
+        assert window.minimumSize().height() <= 600
+        assert (window.width() >= 1440) and (window.height() >= 900)
+        window.close()
+
+    def test_resize_is_inert_to_selection_and_detail(self, qapp) -> None:
+        window = _window_with_results(qapp, (_result("m", status=CheckStatus.MISSING),))
+        assert window._result_list.currentRow() == 0
+        detail_before = window._detail_view.toPlainText()
+        window.resize(1024, 600)
+        qapp.processEvents()
+        window.resize(1440, 900)
+        qapp.processEvents()
+        assert window._result_list.currentRow() == 0
+        assert window._detail_view.toPlainText() == detail_before
+        window.close()
+
+    def test_long_filename_renders_fully_in_document_bar(self, qapp) -> None:
+        long_name = "整车控制器电源管理" + "与门控延时需求说明" * 20 + ".docx"
+        document = Document(
+            document_id="doc-ui",
+            filename=long_name,
+            content_fingerprint="ui-fingerprint",
+            blocks=(_block("body:p0", "功能A"),),
+            coverage=Coverage.COMPLETE,
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        assert window._doc_name_label.text() == long_name  # never truncated
+        assert window._doc_name_label.wordWrap()  # wraps, no off-window text
+        window.close()
+
+    def test_long_chinese_name_renders_in_row_and_detail(self, qapp) -> None:
+        long_name = "带过压保护与短路保护功能的门控延时上电输出控制" * 4
+        long_item = CheckItem(
+            item_id="long",
+            code="L-01",
+            name=long_name,
+            detection_phrase="门控延时",
+            aliases=(),
+        )
+        result = CheckResult(
+            check_item=long_item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(),
+            comparison_state=ComparisonState.NOT_COMPARED,
+            comparison_reason="",
+            review_reasons=(),
+            rule_revision="r1",
+        )
+        window = _window_with_results(qapp, (result,))
+        assert window._result_list.count() == 1
+        assert long_name in window._result_list.item(0).text()
+        window._show_detail(result)
+        assert long_name in window._detail_view.toPlainText()
+        window.close()
+
+    def test_hundred_plus_results_render_with_visible_count(self, qapp) -> None:
+        results = tuple(_result(f"r{i}", status=CheckStatus.CONFIGURED) for i in range(120))
+        window = _window_with_results(qapp, results)
+        assert window._result_list.count() == 120
+        assert window._visible_count_label.text() == "显示 120 / 120"
+        assert window._result_list.currentRow() == 0  # selection still sound
+        window.close()
+
+    def test_hundred_plus_checklist_items_render_with_row_actions(self, qapp) -> None:
+        items = tuple(_item(f"i{i}", phrase=f"功能{i}") for i in range(120))
+        window = MainWindow(check_items=items)
+        page = window._management_page
+        assert page._table.rowCount() == 120
+        assert page._count_label.text() == "共 120 项"
+        # The last row still carries its own action buttons.
+        assert page._table.cellWidget(119, 6) is not None
+        window.close()

@@ -368,6 +368,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._search_input.setFocus)
+        # Prototype footer — the persistent review disclaimer lives in the
+        # status bar as a permanent (never obscured) note; transient
+        # operation feedback keeps using status-bar messages on the left.
+        # 本地运行 · 不上传文件 is stated in the nav row beside the tabs.
+        footer_note = QLabel("工程师负责最终判断 · 已配置 ≠ 描述符合要求")
+        self.statusBar().addPermanentWidget(footer_note)
         if self._check_items:
             self.statusBar().showMessage(f"已加载 {len(self._check_items)} 项检查基准")
         else:
@@ -467,10 +473,7 @@ class MainWindow(QMainWindow):
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
         self._warnings_label.setVisible(False)
-        self._warnings_label.setStyleSheet(
-            f"background: {style.WARNING_BG}; color: {style.WARNING_TEXT};"
-            f"border: 1px solid {style.WARNING_BORDER}; border-radius: 4px; padding: 8px 12px;"
-        )
+        self._warnings_label.setStyleSheet(style.banner_stylesheet())
         layout.addWidget(self._warnings_label)
 
         # --- document bar (prototype document-bar) ---
@@ -840,9 +843,7 @@ class MainWindow(QMainWindow):
         elif state == "load-error":
             self.set_baseline_failure(error or "未知错误")
         elif state == "unsupported-schema":
-            self._baseline_banner.setStyleSheet(
-                f"background-color: {style.ERROR_BG}; color: {style.ERROR_TEXT}; padding: 6px 10px;"
-            )
+            self._baseline_banner.setStyleSheet(style.banner_stylesheet(error=True))
             self._baseline_banner.setText(
                 "当前基准文件由不兼容的较新版本创建。\n"
                 "本版本不会覆盖该文件。\n"
@@ -854,17 +855,13 @@ class MainWindow(QMainWindow):
 
     def set_baseline_recovered(self, message: str) -> None:
         """Show a persistent warning that the baseline came from backup."""
-        self._baseline_banner.setStyleSheet(
-            f"background-color: {style.WARNING_BG}; color: {style.WARNING_TEXT}; padding: 6px 10px;"
-        )
+        self._baseline_banner.setStyleSheet(style.banner_stylesheet())
         self._baseline_banner.setText(message)
         self._baseline_banner.setVisible(True)
 
     def set_baseline_failure(self, message: str) -> None:
         """Show an explicit compatibility / load failure banner."""
-        self._baseline_banner.setStyleSheet(
-            f"background-color: {style.ERROR_BG}; color: {style.ERROR_TEXT}; padding: 6px 10px;"
-        )
+        self._baseline_banner.setStyleSheet(style.banner_stylesheet(error=True))
         self._baseline_banner.setText(
             f"检查基准加载失败：{message}\n请检查 AppData 目录权限或重新配置基准。"
         )
