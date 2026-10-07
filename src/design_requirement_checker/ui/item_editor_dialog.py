@@ -3,8 +3,8 @@
 Used by ChecklistPage for both Add and Edit flows. Preserves stable
 item_id on edit (UUID generated only for truly new items). Alias IDs
 survive edit when their text content remains unchanged — new/changed
-aliases get a fresh UUID. Validation errors block save; per-field
-warnings appear inline but do not block.
+aliases get a fresh UUID. Required-field errors appear inline (prototype
+``#formError``) and block save.
 """
 
 from __future__ import annotations
@@ -13,21 +13,21 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import Sequence
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QTextEdit,
+    QVBoxLayout,
     QWidget,
 )
 
 from design_requirement_checker.domain import CheckItem, CheckItemAlias
+from design_requirement_checker.ui import style
 
 
 class ItemEditorDialog(QDialog):
@@ -59,24 +59,30 @@ class ItemEditorDialog(QDialog):
         self.resize(760, 640)
         self.setMinimumSize(560, 520)
 
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        # Prototype form structure: labels sit above their inputs; 编号 and
+        # 分类 share one row (.form-grid). 检测短语 is production-only — it
+        # is the phrase the matcher searches for, so the editor must
+        # collect it (the prototype matches on the name instead).
+        body = QVBoxLayout(self)
+        body.setContentsMargins(24, 20, 24, 20)
+        body.setSpacing(8)
 
-        # Required fields
         self._code_edit = QLineEdit(existing.code if existing else "")
         self._code_edit.setPlaceholderText("必填，例如 SYS-001")
-        form.addRow("编号 *", self._code_edit)
+        self._category_edit = QLineEdit(existing.category if existing else "")
+        grid = QHBoxLayout()
+        grid.setSpacing(15)
+        grid.addLayout(self._field("编号 *", self._code_edit), 1)
+        grid.addLayout(self._field("分类", self._category_edit), 1)
+        body.addLayout(grid)
 
         self._name_edit = QLineEdit(existing.name if existing else "")
         self._name_edit.setPlaceholderText("必填，例如 门控制")
-        form.addRow("功能名称 *", self._name_edit)
+        body.addLayout(self._field("功能名称 *", self._name_edit))
 
         self._phrase_edit = QLineEdit(existing.detection_phrase if existing else "")
         self._phrase_edit.setPlaceholderText("必填，用于文档内检测")
-        form.addRow("检测短语 *", self._phrase_edit)
-
-        self._category_edit = QLineEdit(existing.category if existing else "")
-        form.addRow("类别", self._category_edit)
+        body.addLayout(self._field("检测短语 *", self._phrase_edit))
 
         # Multi-line plain-text editor: real engineering descriptions are
         # long; a single-line QLineEdit forces truncating review and makes
@@ -84,14 +90,11 @@ class ItemEditorDialog(QDialog):
         self._expected_edit = QPlainTextEdit(existing.expected_description if existing else "")
         self._expected_edit.setPlaceholderText("选填，可粘贴多行期望描述")
         self._expected_edit.setMinimumHeight(96)
-        form.addRow("期望描述", self._expected_edit)
-
-        self._notes_edit = QLineEdit(existing.notes if existing else "")
-        form.addRow("备注", self._notes_edit)
-
-        self._enabled_check = QCheckBox("启用此项")
-        self._enabled_check.setChecked(True if existing is None else existing.enabled)
-        form.addRow("", self._enabled_check)
+        expected_column = self._field("预期要求", self._expected_edit)
+        hint = QLabel("留空时仅核查功能是否出现，不比较描述。")
+        hint.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        expected_column.addWidget(hint)
+        body.addLayout(expected_column, 2)
 
         # Aliases — one per line
         alias_text = ""
@@ -100,22 +103,44 @@ class ItemEditorDialog(QDialog):
         self._aliases_edit = QTextEdit(alias_text)
         self._aliases_edit.setPlaceholderText("每行一个别名，可留空")
         self._aliases_edit.setMaximumHeight(120)
-        form.addRow("别名 (每行一个)", self._aliases_edit)
+        body.addLayout(self._field("别名（每行一个）", self._aliases_edit), 1)
 
-        self._warning_label = QLabel("")
-        self._warning_label.setStyleSheet("color: #856404;")
-        self._warning_label.setWordWrap(True)
-        form.addRow("", self._warning_label)
+        # Prototype 备注 is a small textarea — notes can span lines.
+        self._notes_edit = QPlainTextEdit(existing.notes if existing else "")
+        self._notes_edit.setMaximumHeight(72)
+        body.addLayout(self._field("备注", self._notes_edit))
 
-        # Buttons
+        self._enabled_check = QCheckBox("启用此检查项")
+        self._enabled_check.setChecked(True if existing is None else existing.enabled)
+        body.addWidget(self._enabled_check)
+
+        # Prototype #formError — inline alert text, empty when there is
+        # nothing to report.
+        self._error_label = QLabel("")
+        self._error_label.setStyleSheet(f"color: {style.ERROR_TEXT};")
+        self._error_label.setWordWrap(True)
+        body.addWidget(self._error_label)
+
+        # Prototype .dialog-actions — 取消 plus the primary 保存检查项.
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setText("保存检查项")
+        style.mark_primary(save_button)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
+        body.addWidget(buttons)
 
-        self.setLayout(form)
+    @staticmethod
+    def _field(label_text: str, field: QWidget) -> QVBoxLayout:
+        """One prototype form field: the label above its input."""
+        column = QVBoxLayout()
+        column.setSpacing(3)
+        column.addWidget(QLabel(label_text))
+        column.addWidget(field)
+        return column
 
     def candidate(self) -> CheckItem | None:
         return self._candidate
@@ -134,8 +159,10 @@ class ItemEditorDialog(QDialog):
         if not self._phrase_edit.text().strip():
             missing.append("检测短语")
         if missing:
-            QMessageBox.warning(self, "必填字段缺失", f"请填写：{'、'.join(missing)}")
+            # Inline alert (prototype #formError) — no modal needed.
+            self._error_label.setText(f"请填写：{'、'.join(missing)}")
             return
+        self._error_label.setText("")
 
         # --- Build candidate aliases ---
         raw_aliases = [
@@ -153,7 +180,7 @@ class ItemEditorDialog(QDialog):
             category=self._category_edit.text().strip(),
             expected_description=self._expected_edit.toPlainText().strip(),
             enabled=self._enabled_check.isChecked(),
-            notes=self._notes_edit.text().strip(),
+            notes=self._notes_edit.toPlainText().strip(),
         )
         self.accept()
 

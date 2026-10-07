@@ -617,12 +617,11 @@ class TestItemEditorFields:
         from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
 
         dlg = ItemEditorDialog(existing=None)
-        dlg._code_edit.setText("")
         dlg._name_edit.setText("Something")
         dlg._phrase_edit.setText("Something")
-        with patch("PySide6.QtWidgets.QMessageBox.warning"):
-            dlg._on_save()
+        dlg._on_save()
         assert dlg.candidate() is None
+        assert "编号" in dlg._error_label.text()  # inline #formError alert
 
     def test_add_empty_name_blocks_accept(self, qapp) -> None:
         from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
@@ -631,9 +630,9 @@ class TestItemEditorFields:
         dlg._code_edit.setText("C1")
         dlg._name_edit.setText("")
         dlg._phrase_edit.setText("Something")
-        with patch("PySide6.QtWidgets.QMessageBox.warning"):
-            dlg._on_save()
+        dlg._on_save()
         assert dlg.candidate() is None
+        assert "功能名称" in dlg._error_label.text()
 
     def test_add_empty_phrase_blocks_accept(self, qapp) -> None:
         from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
@@ -642,9 +641,9 @@ class TestItemEditorFields:
         dlg._code_edit.setText("C1")
         dlg._name_edit.setText("N")
         dlg._phrase_edit.setText("")
-        with patch("PySide6.QtWidgets.QMessageBox.warning"):
-            dlg._on_save()
+        dlg._on_save()
         assert dlg.candidate() is None
+        assert "检测短语" in dlg._error_label.text()
 
     def test_add_empty_expected_description_allowed(self, qapp) -> None:
         from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
@@ -709,6 +708,36 @@ class TestItemEditorFields:
         assert candidate is not None
         assert candidate.expected_description == edited  # saves untruncated
         assert candidate.expected_description.count("\n") == 3
+
+
+class TestItemEditorPrototypeAlignment:
+    """T7 — the editor follows the prototype form structure: labels above
+    inputs, 编号+分类 on one row, multiline 备注, inline error, prototype
+    dialog-actions wording with a primary 保存检查项."""
+
+    def test_actions_use_prototype_wording_and_primary_save(self, qapp) -> None:
+        from PySide6.QtWidgets import QDialogButtonBox
+
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        box = dlg.findChild(QDialogButtonBox)
+        assert box is not None
+        save = box.button(QDialogButtonBox.StandardButton.Save)
+        cancel = box.button(QDialogButtonBox.StandardButton.Cancel)
+        assert save.text() == "保存检查项"
+        assert save.property("primary") is True
+        assert cancel.text() == "取消"
+
+    def test_notes_is_multiline_and_error_starts_empty(self, qapp) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog(existing=None)
+        assert isinstance(dlg._notes_edit, QPlainTextEdit)
+        assert dlg._error_label.text() == ""  # no fabricated error state
+        assert dlg._enabled_check.text() == "启用此检查项"
 
 
 class TestAliasMetadataPreservation:
