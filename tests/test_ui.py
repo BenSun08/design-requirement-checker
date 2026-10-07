@@ -178,10 +178,12 @@ class TestEnabledActions:
         "待人工核查",
         "仅异常",
         # Management-page buttons live in the always-available checklist
-        # section (its own enablement rules are covered separately).
+        # section (its own enablement rules are covered separately). Rows
+        # carry their own 编辑 / 禁用|启用 / 删除 buttons.
         "新增检查项",
         "编辑",
-        "切换启用/禁用",
+        "禁用",
+        "启用",
         "删除",
         "保存基准",
         "返回文档核查",

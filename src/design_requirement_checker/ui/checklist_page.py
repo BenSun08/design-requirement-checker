@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -34,16 +35,21 @@ from PySide6.QtWidgets import (
 )
 
 from design_requirement_checker.domain import CheckItem
+from design_requirement_checker.ui import style
 
 _COLUMN_HEADERS = (
     "编号",
-    "名称",
-    "类别",
+    "功能名称",
+    "分类",
     "检测短语",
-    "期望描述",
-    "启用",
-    "备注",
+    "预期要求",
+    "状态",
+    "操作",
 )
+
+#: Column indexes tests and row actions rely on.
+_STATUS_COLUMN = 5
+_ACTIONS_COLUMN = 6
 
 
 class ChecklistPage(QWidget):
@@ -72,31 +78,46 @@ class ChecklistPage(QWidget):
         self._save_handler = save_handler
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 14)
+        outer.setContentsMargins(24, 18, 24, 18)
         outer.setSpacing(12)
 
-        header = QLabel("编辑检查基准：新增、修改或调整每项的启用状态后点击“保存基准”以持久化。")
-        header.setWordWrap(True)
-        outer.addWidget(header)
-
-        # Toolbar
-        toolbar = QHBoxLayout()
+        # Prototype .management-title — heading + subtitle on the left,
+        # the primary 新增检查项 action on the right.
+        title_row = QHBoxLayout()
+        title_column = QVBoxLayout()
+        title_column.setSpacing(2)
+        title = QLabel("检查项管理")
+        title_font = title.font()
+        title_font.setBold(True)
+        title_font.setPointSizeF(14)
+        title.setFont(title_font)
+        subtitle = QLabel("维护核查基准。保存后持久化到本地基准文件。")
+        subtitle.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        title_column.addWidget(title)
+        title_column.addWidget(subtitle)
+        title_row.addLayout(title_column)
+        title_row.addStretch()
         self._add_button = QPushButton("新增检查项")
+        style.mark_primary(self._add_button)
         self._add_button.clicked.connect(self._on_add)
-        toolbar.addWidget(self._add_button)
-        self._edit_button = QPushButton("编辑")
-        self._edit_button.clicked.connect(self._on_edit_selected)
-        toolbar.addWidget(self._edit_button)
-        self._toggle_button = QPushButton("切换启用/禁用")
-        self._toggle_button.clicked.connect(self._on_toggle_enabled)
-        toolbar.addWidget(self._toggle_button)
-        self._delete_button = QPushButton("删除")
-        self._delete_button.clicked.connect(self._on_delete_selected)
-        toolbar.addWidget(self._delete_button)
-        toolbar.addStretch()
-        outer.addLayout(toolbar)
+        title_row.addWidget(self._add_button)
+        outer.addLayout(title_row)
 
-        # Table
+        # Prototype .management-note — both sentences are production-true:
+        # a baseline change invalidates results; disabled items are excluded
+        # from verification.
+        notice = QLabel("基准变更后需重新核查。禁用的检查项不计入核查结果。")
+        notice.setWordWrap(True)
+        notice.setStyleSheet(
+            f"background-color: {style.INFO_BG};"
+            f"border: 1px solid {style.INFO_BORDER};"
+            f"color: {style.TEXT}; padding: 10px 14px;"
+        )
+        outer.addWidget(notice)
+
+        # Table — prototype column structure (编号/功能名称/分类/预期要求/
+        # 状态/操作) plus the production 检测短语 column. 备注 stays in the
+        # item editor. Every row carries its own 编辑/禁用|启用/删除 buttons.
         self._table = QTableWidget(len(self._items), len(_COLUMN_HEADERS))
         self._table.setHorizontalHeaderLabels(_COLUMN_HEADERS)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -104,13 +125,16 @@ class ChecklistPage(QWidget):
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
         hdr = self._table.horizontalHeader()
-        hdr.setStretchLastSection(True)
+        hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self._populate_table()
         self._table.doubleClicked.connect(lambda _index: self._on_edit_selected())
         outer.addWidget(self._table, 1)
 
-        # Footer
+        # Footer — production-only: the prototype has no persistence, so it
+        # has no save action. 保存基准 runs the handler (validate → persist →
+        # publish); 返回文档核查 never saves.
         footer = QHBoxLayout()
         self._count_label = QLabel(f"共 {len(self._items)} 项")
         footer.addWidget(self._count_label)
@@ -156,18 +180,70 @@ class ChecklistPage(QWidget):
         self.close_requested.emit()
 
     def _populate_table(self) -> None:
+        """Rebuild all rows (prototype .management table).
+
+        Columns: 编号 | 功能名称 | 分类 | 检测短语 | 预期要求 | 状态 | 操作.
+        The 状态 cell keeps the item_id in its UserRole data. Disabled rows
+        render muted (prototype .disabled-row). The 操作 cell carries the
+        row's own 编辑 / 禁用|启用 / 删除 buttons; the row index captured at
+        build time is always in sync because every mutation rebuilds the
+        table through :meth:`_refresh_table`.
+        """
         self._table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
-            self._table.setItem(row, 0, QTableWidgetItem(item.code))
-            self._table.setItem(row, 1, QTableWidgetItem(item.name))
-            self._table.setItem(row, 2, QTableWidgetItem(item.category))
-            self._table.setItem(row, 3, QTableWidgetItem(item.detection_phrase))
-            self._table.setItem(row, 4, QTableWidgetItem(item.expected_description))
-            enabled_text = "启用" if item.enabled else "已禁用"
-            cell = QTableWidgetItem(enabled_text)
-            cell.setData(Qt.ItemDataRole.UserRole, item.item_id)
-            self._table.setItem(row, 5, cell)
-            self._table.setItem(row, 6, QTableWidgetItem(item.notes))
+            cells = (
+                item.code,
+                item.name,
+                item.category or "未分类",
+                item.detection_phrase,
+                item.expected_description or "未设置 · 仅核查名称",
+                "启用" if item.enabled else "禁用",
+            )
+            for column, text in enumerate(cells):
+                cell = QTableWidgetItem(text)
+                if column == _STATUS_COLUMN:
+                    cell.setData(Qt.ItemDataRole.UserRole, item.item_id)
+                if not item.enabled:
+                    cell.setForeground(QBrush(QColor(style.MUTED)))
+                self._table.setItem(row, column, cell)
+            self._table.setCellWidget(row, _ACTIONS_COLUMN, self._build_row_actions(row))
+
+    def _build_row_actions(self, row: int) -> QWidget:
+        """The per-row 编辑 / 禁用|启用 / 删除 buttons (prototype td buttons)."""
+        actions = QWidget()
+        layout = QHBoxLayout(actions)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+        item = self._items[row]
+        small = "padding: 2px 8px; font-size: 12px;"
+        edit_button = QPushButton("编辑")
+        edit_button.setStyleSheet(small)
+        edit_button.clicked.connect(lambda _checked=False, r=row: self._edit_row(r))
+        layout.addWidget(edit_button)
+        toggle_button = QPushButton("禁用" if item.enabled else "启用")
+        toggle_button.setStyleSheet(small)
+        toggle_button.clicked.connect(lambda _checked=False, r=row: self._toggle_row(r))
+        layout.addWidget(toggle_button)
+        delete_button = QPushButton("删除")
+        delete_button.setStyleSheet(small)
+        delete_button.clicked.connect(lambda _checked=False, r=row: self._delete_row(r))
+        layout.addWidget(delete_button)
+        return actions
+
+    def _edit_row(self, row: int) -> None:
+        if 0 <= row < self._table.rowCount():
+            self._table.selectRow(row)
+            self._on_edit_selected()
+
+    def _toggle_row(self, row: int) -> None:
+        if 0 <= row < self._table.rowCount():
+            self._table.selectRow(row)
+            self._on_toggle_enabled()
+
+    def _delete_row(self, row: int) -> None:
+        if 0 <= row < self._table.rowCount():
+            self._table.selectRow(row)
+            self._on_delete_selected()
 
     def _refresh_table(self) -> None:
         self._populate_table()

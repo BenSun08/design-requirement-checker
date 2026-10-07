@@ -507,7 +507,7 @@ class TestChecklistWorkspace:
         dialog._table.selectRow(0)
         dialog._on_toggle_enabled()
         assert dialog.current_items()[0].enabled is False
-        assert dialog._table.item(0, 5).text() == "已禁用"
+        assert dialog._table.item(0, 5).text() == "禁用"
         dialog._on_toggle_enabled()
         assert dialog.current_items()[0].enabled is True
         assert dialog._table.item(0, 5).text() == "启用"
