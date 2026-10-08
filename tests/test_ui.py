@@ -170,7 +170,24 @@ def _result_with_evidence(
 
 
 class TestEnabledActions:
-    _FILTERS = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"}
+    _FILTERS = {
+        "全部",
+        "已配置",
+        "未配置",
+        "已划除",
+        "待人工核查",
+        "仅异常",
+        # Management-page buttons live in the always-available checklist
+        # section (its own enablement rules are covered separately). Rows
+        # carry their own 编辑 / 禁用|启用 / 删除 buttons.
+        "新增检查项",
+        "编辑",
+        "禁用",
+        "启用",
+        "删除",
+        "保存基准",
+        "返回文档核查",
+    }
 
     def test_only_implemented_actions_are_enabled(self, qapp) -> None:
         window = MainWindow()
@@ -180,7 +197,7 @@ class TestEnabledActions:
             b.text() for b in buttons if not b.isEnabled() and b.text() not in self._FILTERS
         ]
         window.close()
-        assert sorted(enabled) == ["导入 DOCX", "检查项管理"]
+        assert sorted(enabled) == ["选择 DOCX", "选择 DOCX 文件"]
         assert "开始核查" in disabled
         assert "取消核查" in disabled
 
@@ -939,10 +956,13 @@ class TestReviewWorkspaceShell:
 
     def test_actions_remain_after_shell_rebuild(self, qapp) -> None:
         window = MainWindow(check_items=(_item(),))
-        assert window._import_button.text() == "导入 DOCX"
+        assert window._import_button.text() == "选择 DOCX"
         assert window._run_button.text() == "开始核查"
         assert window._cancel_button.text() == "取消核查"
-        assert window._manage_button.text() == "检查项管理"
+        # Navigation is now a primary section structure (prototype parity).
+        assert window._nav_tabs.count() == 2
+        assert window._nav_tabs.tabText(0) == "文档核查"
+        assert "检查项管理" in window._nav_tabs.tabText(1)
         window.close()
 
     def test_document_still_renders_after_import(self, qapp, tmp_path) -> None:
@@ -1027,7 +1047,9 @@ class TestSummaryAndOrdering:
         window.set_document(document)
         results = verify(document, (_item("a", "功能"),))
         window.complete_verification(window._op_generation, results)
-        assert "全部" in window._summary_label.text()
+        assert window._summary_card_values["total"].text() == "1"
+        assert window._summary_card_values["configured"].text() == "1"
+        assert window._summary_cards_row.isHidden() is False
         window.close()
 
 
@@ -1112,9 +1134,10 @@ class TestFiltersAndSearch:
 
     def test_summary_stays_stable_while_filtering(self, qapp) -> None:
         window = _window_with_results(qapp, self._results())
-        before = window._summary_label.text()
+        before = {key: lbl.text() for key, lbl in window._summary_card_values.items()}
         window._set_filter("未配置")
-        assert window._summary_label.text() == before
+        after = {key: lbl.text() for key, lbl in window._summary_card_values.items()}
+        assert after == before  # filtering never recomputes verification
         window.close()
 
     def test_search_matches_code_name_category_expected(self, qapp) -> None:
@@ -1917,4 +1940,338 @@ class TestWindowDisplay:
         assert "导入失败" not in window._summary_label.text()
         assert "文本块：0" in window._summary_label.text()
         assert "文档为空" in window._detail_view.toPlainText()
+        window.close()
+
+
+class TestVisualFoundation:
+    """T1: shared presentation tokens change no behavior, only looks."""
+
+    def test_style_applies_to_application_without_behavior_change(self, qapp) -> None:
+        from design_requirement_checker.ui import style
+
+        style.apply_app_style(qapp)
+        window = MainWindow(check_items=(_item(),))
+        assert window.state is UiState.EMPTY
+        assert window._run_button.isEnabled() is False
+        window.close()
+
+    def test_status_badge_colors_cover_known_statuses(self) -> None:
+        from design_requirement_checker.ui import style
+
+        for label in ("已配置", "未配置", "已划除", "待人工核查", "描述有差异"):
+            assert f"color: {style.STATUS_COLORS[label]}" in style.status_badge_style(label)
+        # Unknown statuses fall back to muted — unknown ≠ error.
+        assert f"color: {style.MUTED}" in style.status_badge_style("未知状态")
+
+    def test_mark_primary_is_presentation_only(self, qapp) -> None:
+        from design_requirement_checker.ui import style
+
+        button = QPushButton("保存")
+        style.mark_primary(button)
+        assert button.property("primary") is True
+        # Visual marking never toggles enablement or text.
+        assert button.isEnabled() is True
+        assert button.text() == "保存"
+
+
+class TestNavigationShell:
+    """T2: 文档核查 / 检查项管理 tabs switch reliably and safely."""
+
+    def test_tabs_switch_between_workspace_and_management(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert window._pages.currentIndex() == 0
+        window._on_manage_clicked()
+        assert window._nav_tabs.currentIndex() == 1
+        assert window._pages.currentIndex() == 1
+        window._nav_tabs.setCurrentIndex(0)
+        assert window._pages.currentIndex() == 0
+        window.close()
+
+    def test_management_tab_disabled_during_background_work(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert window._nav_tabs.isTabEnabled(1) is True
+        window._state = UiState.IMPORTING
+        window._update_actions()
+        assert window._nav_tabs.isTabEnabled(1) is False
+        window._state = UiState.VERIFYING
+        window._update_actions()
+        assert window._nav_tabs.isTabEnabled(1) is False
+        window.close()
+
+    def test_tab_count_reflects_baseline_size(self, qapp) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        assert "(1)" in window._nav_tabs.tabText(1)
+        window.set_check_items((_item("a"), _item("b", phrase="功能B")), baseline_id="bid")
+        assert "(2)" in window._nav_tabs.tabText(1)
+        window.close()
+
+
+class TestSummaryCards:
+    """T4: prototype summary cards — counts by domain state, 描述差异 orthogonal."""
+
+    def test_cards_reflect_domain_counts(self, qapp) -> None:
+        window = _window_with_results(
+            qapp,
+            (
+                _result("c1", status=CheckStatus.CONFIGURED),
+                _result(
+                    "c2",
+                    status=CheckStatus.CONFIGURED,
+                    comparison_state=ComparisonState.DIFFERENT,
+                ),
+                _result("m1", status=CheckStatus.MISSING),
+                _result("s1", status=CheckStatus.STRUCK_OUT),
+                _result("u1", status=None, resolution=Resolution.UNRESOLVED),
+            ),
+        )
+        values = window._summary_card_values
+        assert values["total"].text() == "5"  # cfg + miss + struck + unresolved
+        assert values["configured"].text() == "2"
+        assert values["missing"].text() == "1"
+        assert values["struck_out"].text() == "1"
+        assert values["unresolved"].text() == "1"
+        assert values["different"].text() == "1"  # counted separately
+        window.close()
+
+    def test_cards_hidden_without_results(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        assert window._summary_cards_row.isHidden() is True
+        window.close()
+
+    def test_cards_hidden_after_results_cleared(self, qapp) -> None:
+        window = _window_with_results(qapp, (_result("c1", status=CheckStatus.CONFIGURED),))
+        assert window._summary_cards_row.isHidden() is False
+        # Baseline change invalidates results → stale counts must disappear.
+        window.set_check_items((_item("a"), _item("b", phrase="功能B")), baseline_id="bid")
+        assert window._summary_cards_row.isHidden() is True
+        # A cancelled rerun never shows old counts either.
+        gen = window.start_verification()
+        window.complete_verification(gen, (_result("c2", status=CheckStatus.CONFIGURED),))
+        assert window._summary_cards_row.isHidden() is False
+        window.cancel_verification()
+        assert window._summary_cards_row.isHidden() is True
+        window.close()
+
+
+class TestResultReviewWorkspace:
+    """T5 structural parity: prototype .workspace-grid / .result-row / .detail."""
+
+    def test_list_pane_has_heading_and_visible_count(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        window = _window_with_results(qapp, self._three_results())
+        pane_title = window.findChild(QLabel, "paneTitle")
+        assert pane_title is not None and pane_title.text() == "检查项"
+        assert window._visible_count_label.text() == "显示 3 / 3"
+        window.close()
+
+    def test_rows_are_custom_widgets_with_code_name_and_status(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QLabel
+
+        window = _window_with_results(qapp, self._three_results())
+        for i in range(window._result_list.count()):
+            item = window._result_list.item(i)
+            row = window._result_list.itemWidget(item)
+            assert row is not None, "every result row must render a custom widget"
+            labels = [lbl.text() for lbl in row.findChildren(QLabel)]
+            result = item.data(Qt.ItemDataRole.UserRole)
+            assert any(result.check_item.code in text for text in labels)
+            assert result.check_item.name in labels
+            assert any(text in labels for text in ("已配置", "未配置", "已划除", "待人工核查"))
+        window.close()
+
+    def test_difference_rows_carry_hint_label(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        diff = _result_with_evidence(
+            "d",
+            status=CheckStatus.CONFIGURED,
+            comparison_state=ComparisonState.DIFFERENT,
+            evidence=(_evidence(),),
+        )
+        window = _window_with_results(qapp, (diff,))
+        row = window._result_list.itemWidget(window._result_list.item(0))
+        assert "描述有差异" in [lbl.text() for lbl in row.findChildren(QLabel)]
+        window.close()
+
+    def test_first_visible_row_auto_selected(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+
+        results = self._three_results()
+        window = _window_with_results(qapp, results)
+        # Ordering puts 未配置 first; the detail pane must show a current
+        # result immediately (prototype renderResults selection rule).
+        assert window._result_list.currentRow() == 0
+        selected = window._result_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        assert selected.status is CheckStatus.MISSING
+        assert "未配置" in window._detail_view.toPlainText()
+        window.close()
+
+    def test_surviving_selection_kept_on_filter_change(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+
+        results = self._three_results()
+        window = _window_with_results(qapp, results)
+        # Select the struck-out result (last row), then narrow the filter so
+        # it is still visible: the selection must survive repopulation.
+        window._result_list.setCurrentRow(window._result_list.count() - 1)
+        window._set_filter("已划除")
+        assert window._result_list.count() == 1
+        selected = window._result_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        assert selected.status is CheckStatus.STRUCK_OUT
+        window.close()
+
+    def test_selection_bar_marks_current_row(self, qapp) -> None:
+        from PySide6.QtWidgets import QWidget
+
+        window = _window_with_results(qapp, self._three_results())
+        window._result_list.setCurrentRow(0)
+        current_item = window._result_list.currentItem()
+        row = window._result_list.itemWidget(current_item)
+        bar = row.findChild(QWidget, "selectionBar")
+        assert bar is not None
+        assert "transparent" not in bar.styleSheet()
+        window._result_list.setCurrentRow(1)
+        assert "transparent" in bar.styleSheet()
+        window.close()
+
+    def test_detail_shows_comparison_block_headings(self, qapp) -> None:
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(_evidence(),))
+        window = MainWindow(check_items=(_item(),))
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "预期要求 · 检查基准" in text
+        assert "实际内容 · 检测文档" in text
+        assert "匹配证据" in text
+        window.close()
+
+    def test_detail_context_section_is_prev_current_next(self, qapp) -> None:
+        document = Document(
+            document_id="doc-ui",
+            filename="ui.docx",
+            content_fingerprint="fp",
+            blocks=(
+                _block("body:p0", "前文段落"),
+                _block("body:p1", "门控延时功能已配置"),
+                _block("body:p2", "后文段落"),
+            ),
+            coverage=Coverage.COMPLETE,
+        )
+        ev = _evidence(block_id="body:p1", requirement_text="门控延时")
+        result = _result_with_evidence("a", status=CheckStatus.CONFIGURED, evidence=(ev,))
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        window._show_detail(result)
+        text = window._detail_view.toPlainText()
+        assert "原文上下文" in text
+        assert "上一段" in text
+        assert "当前 · 匹配位置" in text
+        assert "下一段" in text
+        window.close()
+
+    @staticmethod
+    def _three_results():
+        return (
+            _result("c", status=CheckStatus.CONFIGURED),
+            _result("m", status=CheckStatus.MISSING),
+            _result("s", status=CheckStatus.STRUCK_OUT),
+        )
+
+
+class TestFooterAndResponsiveChecks:
+    """T8 — persistent footer disclaimer plus long-content / bounded-scale
+    robustness. Structural assertions only: no pixel or golden values, so
+    nothing here can break under Windows DPI scaling."""
+
+    def test_footer_disclaimer_is_a_persistent_status_note(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        window = MainWindow(check_items=(_item(),))
+        notes = [w.text() for w in window.statusBar().findChildren(QLabel)]
+        assert "工程师负责最终判断 · 已配置 ≠ 描述符合要求" in notes
+        # The footer note is permanent — a transient message never removes it.
+        window.statusBar().showMessage("核查完成")
+        notes = [w.text() for w in window.statusBar().findChildren(QLabel)]
+        assert "工程师负责最终判断 · 已配置 ≠ 描述符合要求" in notes
+        assert window.statusBar().currentMessage() == "核查完成"
+        window.close()
+
+    def test_minimum_size_fits_1024x600_and_default_is_1440x900(self, qapp) -> None:
+        window = MainWindow(check_items=(_item(),))
+        assert window.minimumSize().width() <= 1024
+        assert window.minimumSize().height() <= 600
+        assert (window.width() >= 1440) and (window.height() >= 900)
+        window.close()
+
+    def test_resize_is_inert_to_selection_and_detail(self, qapp) -> None:
+        window = _window_with_results(qapp, (_result("m", status=CheckStatus.MISSING),))
+        assert window._result_list.currentRow() == 0
+        detail_before = window._detail_view.toPlainText()
+        window.resize(1024, 600)
+        qapp.processEvents()
+        window.resize(1440, 900)
+        qapp.processEvents()
+        assert window._result_list.currentRow() == 0
+        assert window._detail_view.toPlainText() == detail_before
+        window.close()
+
+    def test_long_filename_renders_fully_in_document_bar(self, qapp) -> None:
+        long_name = "整车控制器电源管理" + "与门控延时需求说明" * 20 + ".docx"
+        document = Document(
+            document_id="doc-ui",
+            filename=long_name,
+            content_fingerprint="ui-fingerprint",
+            blocks=(_block("body:p0", "功能A"),),
+            coverage=Coverage.COMPLETE,
+        )
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(document)
+        assert window._doc_name_label.text() == long_name  # never truncated
+        assert window._doc_name_label.wordWrap()  # wraps, no off-window text
+        window.close()
+
+    def test_long_chinese_name_renders_in_row_and_detail(self, qapp) -> None:
+        long_name = "带过压保护与短路保护功能的门控延时上电输出控制" * 4
+        long_item = CheckItem(
+            item_id="long",
+            code="L-01",
+            name=long_name,
+            detection_phrase="门控延时",
+            aliases=(),
+        )
+        result = CheckResult(
+            check_item=long_item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.CONFIGURED,
+            evidence=(),
+            comparison_state=ComparisonState.NOT_COMPARED,
+            comparison_reason="",
+            review_reasons=(),
+            rule_revision="r1",
+        )
+        window = _window_with_results(qapp, (result,))
+        assert window._result_list.count() == 1
+        assert long_name in window._result_list.item(0).text()
+        window._show_detail(result)
+        assert long_name in window._detail_view.toPlainText()
+        window.close()
+
+    def test_hundred_plus_results_render_with_visible_count(self, qapp) -> None:
+        results = tuple(_result(f"r{i}", status=CheckStatus.CONFIGURED) for i in range(120))
+        window = _window_with_results(qapp, results)
+        assert window._result_list.count() == 120
+        assert window._visible_count_label.text() == "显示 120 / 120"
+        assert window._result_list.currentRow() == 0  # selection still sound
+        window.close()
+
+    def test_hundred_plus_checklist_items_render_with_row_actions(self, qapp) -> None:
+        items = tuple(_item(f"i{i}", phrase=f"功能{i}") for i in range(120))
+        window = MainWindow(check_items=items)
+        page = window._management_page
+        assert page._table.rowCount() == 120
+        assert page._count_label.text() == "共 120 项"
+        # The last row still carries its own action buttons.
+        assert page._table.cellWidget(119, 6) is not None
         window.close()

@@ -260,7 +260,8 @@ from design_requirement_checker.__main__ import main
 app = QApplication([])
 observed = []
 enabled_actions = []
-filter_labels = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常"}
+filter_labels = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常",
+                 "新增检查项", "编辑", "切换启用/禁用", "删除", "保存基准", "返回文档核查"}
 def inspect_and_close():
     windows = [w for w in app.topLevelWidgets() if w.isVisible()]
     observed.extend(windows)
@@ -275,7 +276,7 @@ def inspect_and_close():
 QTimer.singleShot(100, inspect_and_close)
 assert main([]) == 0
 assert len(observed) == 1, "Startup must show one main window"
-assert sorted(enabled_actions) == ["导入 DOCX", "检查项管理"], \\
+assert sorted(enabled_actions) == ["选择 DOCX", "选择 DOCX 文件"], \\
        "Only implemented operations may be enabled"
 """
     result = subprocess.run(

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 
 from design_requirement_checker.application import load_baseline_from
 from design_requirement_checker.baseline_store import default_path
+from design_requirement_checker.ui import style
 from design_requirement_checker.ui.main_window import MainWindow
 
 
@@ -18,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(app, QApplication):
         raise RuntimeError("Desktop startup requires QApplication")
     app.setApplicationName("Design Requirement Checker")
+    style.apply_app_style(app)
 
     # --- Load baseline from AppDataLocation; never blocks startup. ---
     baseline_path = default_path()
