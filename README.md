@@ -101,6 +101,14 @@ Cursor and launching the `design_requirement_checker` module
 macOS and Windows are development and CI platforms; the production runtime
 target is Windows 10/11 x64 only.
 
+## Offline Windows development setup
+
+End users should use the packaged Windows `.exe`. For development on an offline
+Windows PC, manually run the `Build Windows offline development bundle` GitHub
+Actions workflow and download its artifact. Transfer it with the matching
+repository source and an official Python 3.13 x64 installer to the offline PC,
+then follow `README-OFFLINE-INSTALL.txt` in the bundle.
+
 ## Windows build
 
 Windows artifacts are built **on Windows** via the manually triggered
