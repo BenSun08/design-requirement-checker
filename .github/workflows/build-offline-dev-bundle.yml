@@ -1,0 +1,100 @@
+name: Build Windows offline development bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Download dependency wheels
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force offline-dev-bundle/wheelhouse | Out-Null
+          python -m pip download --only-binary=:all: --dest offline-dev-bundle/wheelhouse ".[dev]" setuptools==84.0.0 wheel==0.48.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item pyproject.toml offline-dev-bundle/pyproject.toml
+
+      - name: Verify local-only editable installation
+        shell: pwsh
+        env:
+          PIP_NO_INDEX: "1"
+          PIP_NO_CACHE_DIR: "1"
+          PIP_CONFIG_FILE: NUL
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m venv "$env:RUNNER_TEMP/offline-test-venv"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = "$env:RUNNER_TEMP/offline-test-venv/Scripts/python.exe"
+          & $python -m pip install --no-index --no-cache-dir --find-links=offline-dev-bundle/wheelhouse setuptools==84.0.0 wheel==0.48.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-index --no-cache-dir --find-links=offline-dev-bundle/wheelhouse --no-build-isolation -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Write installation instructions and summary
+        shell: pwsh
+        run: |
+          @'
+          Windows offline development setup
+
+          Install official Python 3.13 x64 separately. Keep existing company Python
+          installations unchanged. Transfer this bundle and the matching repository
+          source to the offline PC. Extract the bundle separately, then copy its
+          wheelhouse/ folder into the matching repository root alongside pyproject.toml.
+          The bundled pyproject.toml is only a reference; do not overwrite the source.
+
+          Git Bash (run from the repository root):
+          py -3.13 -m venv .venv
+          ./.venv/Scripts/python.exe --version
+          ./.venv/Scripts/python.exe -m pip install --no-index --no-cache-dir --find-links=wheelhouse setuptools==84.0.0 wheel==0.48.0
+          ./.venv/Scripts/python.exe -m pip install --no-index --no-cache-dir --find-links=wheelhouse --no-build-isolation -e ".[dev]"
+          ./.venv/Scripts/python.exe -m pip check
+          ./.venv/Scripts/python.exe -m pytest -q
+          ./.venv/Scripts/python.exe -m design_requirement_checker
+
+          PowerShell (run from the repository root):
+          py -3.13 -m venv .venv
+          .\.venv\Scripts\python.exe --version
+          .\.venv\Scripts\python.exe -m pip install --no-index --no-cache-dir --find-links=wheelhouse setuptools==84.0.0 wheel==0.48.0
+          .\.venv\Scripts\python.exe -m pip install --no-index --no-cache-dir --find-links=wheelhouse --no-build-isolation -e ".[dev]"
+          .\.venv\Scripts\python.exe -m pip check
+          .\.venv\Scripts\python.exe -m pytest -q
+          .\.venv\Scripts\python.exe -m design_requirement_checker
+
+          If .venv already exists, back up anything needed and remove that folder
+          before creating a clean environment. No other Python installation is changed.
+          '@ | Set-Content -Encoding utf8 offline-dev-bundle/README-OFFLINE-INSTALL.txt
+          $count = @(Get-ChildItem offline-dev-bundle/wheelhouse -Filter *.whl).Count
+          @"
+          Artifact: DesignRequirementChecker-offline-dev-windows-x64-py313
+          Python: 3.13 x64
+          Git SHA: $env:GITHUB_SHA
+          Wheel count: $count
+          Offline editable installation, pip check, and pytest: PASS
+          "@ | Add-Content -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload offline development bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: DesignRequirementChecker-offline-dev-windows-x64-py313
+          path: offline-dev-bundle/
+          if-no-files-found: error
