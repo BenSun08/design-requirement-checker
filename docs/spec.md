@@ -160,6 +160,14 @@ Compact desktop window: title/toolbar (导入 DOCX / 开始核查 / 取消核查
 (code/name/status/difference hint, ~40%) and a detail pane, persistent
 status/footer.
 
+Presentation follows the browser prototype using native Qt widgets: a
+76-logical-pixel minimum header, 48-logical-pixel minimum navigation, 24-pixel
+page side margins, and a centered import card capped at 800 logical pixels.
+Native installed fonts use explicit point sizes; no fonts are bundled.
+At compact window sizes, search moves below the filters and import-card
+whitespace contracts while the header and text retain their scale. The
+default window is 1440 × 900 with a 1024 × 600 minimum.
+
 - Detail shows canonical name/category/code, status, match method, expected
   vs actual text, difference (`2s → 3s` style rendering), review reasons,
   a multi-evidence occurrence selector, and reconstructed prev/current/next
@@ -184,6 +192,10 @@ status/footer.
 - Add/edit dialog: required code (unique), name, detection phrase; optional
   expected description, category, notes; aliases one per line. Stable
   `item_id`/`alias_id` survive edits and restarts.
+- Expected descriptions, aliases and notes use multiline editors. The
+  resizable editor defaults to 760 × 640 (minimum 560 × 520); its form
+  scrolls at smaller sizes while save/cancel remain reachable. Management
+  descriptions wrap, and row heights adapt to page and column resizing.
 - Duplicate code rejected; duplicate name and overlapping detection phrases
   flagged for explicit confirmation; empty expected description allowed.
 - Disable is reversible; delete requires confirmation. Disabled items are

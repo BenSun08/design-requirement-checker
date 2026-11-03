@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QResizeEvent
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -89,14 +89,14 @@ class ChecklistPage(QWidget):
         title = QLabel("检查项管理")
         title_font = title.font()
         title_font.setBold(True)
-        title_font.setPointSizeF(14)
+        title_font.setPointSizeF(style.FONT_TITLE_PT)
         title.setFont(title_font)
         subtitle = QLabel("维护核查基准。保存后持久化到本地基准文件。")
-        subtitle.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(f"color: {style.MUTED}; font-size: {style.FONT_SECONDARY_PT}pt;")
         title_column.addWidget(title)
         title_column.addWidget(subtitle)
-        title_row.addLayout(title_column)
-        title_row.addStretch()
+        title_row.addLayout(title_column, 1)
         self._add_button = QPushButton("新增检查项")
         style.mark_primary(self._add_button)
         self._add_button.clicked.connect(self._on_add)
@@ -124,10 +124,24 @@ class ChecklistPage(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
+        self._table.verticalHeader().setMinimumSectionSize(60)
+        self._table.setWordWrap(True)
+        self._table.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self._table.setShowGrid(False)
         hdr = self._table.horizontalHeader()
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        # Include the table cell's padding around the three button widgets.
+        # ResizeToContents only counts the widget hint, then Qt subtracts
+        # that padding and clips the labels inside the resulting cell.
+        self._table.setColumnWidth(6, 204)
+        for column, width in ((0, 90), (1, 150), (2, 90), (3, 140), (5, 64)):
+            self._table.setColumnWidth(column, width)
+        self._row_height_timer = QTimer(self)
+        self._row_height_timer.setSingleShot(True)
+        self._row_height_timer.timeout.connect(self._table.resizeRowsToContents)
+        hdr.sectionResized.connect(lambda *_args: self._row_height_timer.start(0))
         self._populate_table()
         self._table.doubleClicked.connect(lambda _index: self._on_edit_selected())
         outer.addWidget(self._table, 1)
@@ -143,11 +157,18 @@ class ChecklistPage(QWidget):
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close
         )
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存基准")
+        style.mark_primary(buttons.button(QDialogButtonBox.StandardButton.Save))
         buttons.button(QDialogButtonBox.StandardButton.Close).setText("返回文档核查")
         buttons.accepted.connect(self._on_save_requested)
         buttons.rejected.connect(self._on_close_requested)
         footer.addWidget(buttons)
         outer.addLayout(footer)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        # Column stretches settle after page geometry changes. Recalculate
+        # wrapped row heights on the next event-loop turn, without delays.
+        self._row_height_timer.start(0)
 
     # --- working-copy sync ---------------------------------------------------
 
@@ -201,12 +222,16 @@ class ChecklistPage(QWidget):
             )
             for column, text in enumerate(cells):
                 cell = QTableWidgetItem(text)
+                cell.setToolTip(text)
+                cell.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 if column == _STATUS_COLUMN:
                     cell.setData(Qt.ItemDataRole.UserRole, item.item_id)
                 if not item.enabled:
                     cell.setForeground(QBrush(QColor(style.MUTED)))
+                    cell.setBackground(QBrush(QColor(style.PANEL_HEADING)))
                 self._table.setItem(row, column, cell)
             self._table.setCellWidget(row, _ACTIONS_COLUMN, self._build_row_actions(row))
+        self._table.resizeRowsToContents()
 
     def _build_row_actions(self, row: int) -> QWidget:
         """The per-row 编辑 / 禁用|启用 / 删除 buttons (prototype td buttons)."""
@@ -215,7 +240,7 @@ class ChecklistPage(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
         item = self._items[row]
-        small = "padding: 2px 8px; font-size: 12px;"
+        small = f"padding: 4px 8px; font-size: {style.FONT_SECONDARY_PT}pt; min-height: 20px;"
         edit_button = QPushButton("编辑")
         edit_button.setStyleSheet(small)
         edit_button.clicked.connect(lambda _checked=False, r=row: self._edit_row(r))
