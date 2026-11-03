@@ -142,6 +142,18 @@ QPushButton[primary="true"]:disabled {{
     background: #9db6d8;
     border-color: #9db6d8;
 }}
+QPushButton[filter="true"] {{
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 6px 11px;
+}}
+QPushButton[filter="true"]:hover {{ background: #edf3fb; }}
+QPushButton[filter="true"]:checked {{
+    background: {PRIMARY_TINT};
+    border-color: #a8bedc;
+    color: #194c8e;
+    font-weight: 600;
+}}
 QProgressBar {{
     border: 1px solid {BORDER};
     border-radius: 4px;

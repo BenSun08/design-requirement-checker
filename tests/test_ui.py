@@ -2348,3 +2348,35 @@ class TestPrototypeProportions:
             window._doc_name_label.width()
         )
         window.close()
+
+    def test_review_hierarchy_search_and_splitter_at_reference_sizes(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPalette
+        from PySide6.QtWidgets import QLabel
+
+        window = _window_with_results(
+            qapp,
+            (_result("m", status=CheckStatus.MISSING), _result("c", status=CheckStatus.CONFIGURED)),
+        )
+        window.show()
+        qapp.processEvents()
+        assert window._summary_card_values["total"].font().pointSizeF() >= 16
+        assert all(
+            label.frameWidth() == 0 for label in window._summary_cards_row.findChildren(QLabel)
+        )
+        assert window._search_input.maximumWidth() <= 300
+        row = window._result_list.itemWidget(window._result_list.currentItem())
+        assert row.autoFillBackground()
+        assert row.palette().color(QPalette.ColorRole.Window).name() == "#eaf1fb"
+        window._result_list.setCurrentRow(1)
+        assert row.palette().color(QPalette.ColorRole.Window).name() == "#ffffff"
+        for size in ((1440, 900), (1024, 600)):
+            window.resize(*size)
+            qapp.processEvents()
+            left, right = window._splitter.sizes()
+            assert 0.36 <= left / (left + right) <= 0.44
+            assert (
+                window._result_list.currentItem().data(Qt.ItemDataRole.UserRole).status
+                is CheckStatus.CONFIGURED
+            )
+        window.close()

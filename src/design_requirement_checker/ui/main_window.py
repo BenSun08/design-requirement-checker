@@ -23,7 +23,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -633,13 +633,15 @@ class MainWindow(QMainWindow):
         """
         bar = QWidget()
         bar.setObjectName("summaryBar")
-        bar.setStyleSheet(f"background: {style.CARD}; border: 1px solid {style.BORDER};")
+        bar.setStyleSheet(
+            f"#summaryBar {{ background: {style.CARD}; border: 1px solid {style.BORDER}; }}"
+        )
         row = QHBoxLayout(bar)
-        row.setContentsMargins(12, 10, 12, 10)
-        row.setSpacing(24)
+        row.setContentsMargins(0, 14, 0, 14)
+        row.setSpacing(0)
         self._summary_card_values: dict[str, QLabel] = {}
         stats = (
-            ("total", "检查项总数", style.TEXT),
+            ("total", "检查项", style.TEXT),
             ("configured", "已配置", style.CONFIGURED),
             ("missing", "未配置", style.MISSING),
             ("struck_out", "已划除", style.STRUCK_OUT),
@@ -648,23 +650,26 @@ class MainWindow(QMainWindow):
         )
         for key, caption_text, color in stats:
             stat = QWidget()
+            stat.setObjectName("summaryStat")
+            stat.setStyleSheet(f"#summaryStat {{ border-right: 1px solid {style.BORDER}; }}")
             stat_row = QHBoxLayout(stat)
-            stat_row.setContentsMargins(0, 0, 0, 0)
+            stat_row.setContentsMargins(16, 0, 16, 0)
             stat_row.setSpacing(6)
             value = QLabel("0")
             value_font = value.font()
             value_font.setBold(True)
-            value_font.setPointSizeF(13)
+            value_font.setPointSizeF(style.FONT_NUMBER_PT)
             value.setFont(value_font)
             value.setStyleSheet(f"color: {color};")
             caption = QLabel(caption_text)
             caption.setStyleSheet(f"color: {style.MUTED};")
             stat_row.addWidget(value)
             stat_row.addWidget(caption)
-            row.addWidget(stat)
+            row.addWidget(stat, 1)
             self._summary_card_values[key] = value
         row.addStretch()
         note = QLabel("描述差异与配置状态独立统计")
+        self._summary_note = note
         note.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
         row.addWidget(note)
         bar.setVisible(False)
@@ -687,6 +692,7 @@ class MainWindow(QMainWindow):
         filter_row = QHBoxLayout()
         for name in ("全部", "仅异常", "已配置", "未配置", "已划除", "待人工核查"):
             btn = QPushButton(name)
+            btn.setProperty("filter", True)
             btn.setCheckable(True)
             btn.setChecked(name == "全部")
             btn.clicked.connect(lambda _checked=False, n=name: self._set_filter(n))
@@ -694,6 +700,9 @@ class MainWindow(QMainWindow):
             filter_row.addWidget(btn)
         filter_row.addStretch()
         self._search_input = QLineEdit()
+        self._search_input.setMinimumWidth(245)
+        self._search_input.setMaximumWidth(300)
+        self._search_input.setMinimumHeight(34)
         self._search_input.setPlaceholderText("搜索：编号 / 名称 / 类别 / 期望描述")
         self._search_input.setClearButtonEnabled(True)
         self._search_input.textChanged.connect(self._populate_results)
@@ -733,7 +742,14 @@ class MainWindow(QMainWindow):
         detail_layout.setSpacing(0)
         self._detail_view = QTextBrowser()
         self._detail_view.setOpenExternalLinks(False)
-        self._detail_view.document().setDocumentMargin(20)
+        self._detail_view.setObjectName("detailView")
+        self._detail_view.setStyleSheet(
+            f"#detailView {{ border: 0; background: {style.CARD}; padding: 22px 24px; }}"
+        )
+        self._detail_view.document().setDocumentMargin(0)
+        self._detail_view.document().setDefaultStyleSheet(
+            f"h3 {{ font-size: 15pt; margin: 0 0 6px; }} table {{ border-color: {style.BORDER}; }}"
+        )
         self._detail_view.anchorClicked.connect(self._on_evidence_anchor)
         detail_layout.addWidget(self._detail_view, 1)
 
@@ -976,8 +992,14 @@ class MainWindow(QMainWindow):
         """
         item = result.check_item
         row = QWidget()
+        # Opaque item widgets cover the default item text while the plain
+        # text remains available to accessibility and keyboard navigation.
+        row.setAutoFillBackground(True)
+        palette = row.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(style.CARD))
+        row.setPalette(palette)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(0, 0, 16, 0)
         layout.setSpacing(10)
         # 3px selection bar (prototype .result-row.selected inset); styled
         # on selection changes via _style_row_selection.
@@ -985,13 +1007,17 @@ class MainWindow(QMainWindow):
         bar.setObjectName("selectionBar")
         bar.setFixedWidth(3)
         bar.setStyleSheet("background: transparent;")
-        layout.addWidget(bar, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(bar)
         left = QVBoxLayout()
+        left.setContentsMargins(3, 12, 0, 12)
         left.setSpacing(2)
         code_text = item.code if not item.category else f"{item.code} · {item.category}"
         code_label = QLabel(code_text)
         code_label.setStyleSheet(f"color: {style.MUTED}; font-size: 11px;")
         name_label = QLabel(item.name)
+        name_label.setWordWrap(True)
+        name_label.setMinimumWidth(0)
+        name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         name_font = name_label.font()
         name_font.setBold(True)
         name_label.setFont(name_font)
@@ -1007,7 +1033,7 @@ class MainWindow(QMainWindow):
         status_text = self._status_text(result)
         status_label = QLabel(status_text)
         status_label.setStyleSheet(style.status_badge_style(status_text))
-        layout.addWidget(status_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(status_label, 0, Qt.AlignmentFlag.AlignVCenter)
         return row
 
     def _style_row_selection(
@@ -1020,6 +1046,12 @@ class MainWindow(QMainWindow):
             row = self._result_list.itemWidget(item)
             if row is None:
                 continue
+            palette = row.palette()
+            palette.setColor(
+                QPalette.ColorRole.Window,
+                QColor(style.SELECTED_ROW if selected else style.CARD),
+            )
+            row.setPalette(palette)
             bar = row.findChild(QWidget, "selectionBar")
             if bar is not None:
                 bar.setStyleSheet(
@@ -1145,7 +1177,7 @@ class MainWindow(QMainWindow):
             '<table width="100%" cellspacing="0" cellpadding="0" border="0"><tr>'
             f'<td valign="top"><h3>{html.escape(item.name)}</h3>'
             f'<p style="color: {style.MUTED}; font-size: 12px">{code_line}</p></td>'
-            f'<td width="1" align="right" valign="top">'
+            '<td width="25%" align="right" valign="top">'
             "<p><b>"
             f'<span style="color: {status_color}; font-size: 13px">{status_text}</span>'
             "</b></p>"
@@ -1192,7 +1224,7 @@ class MainWindow(QMainWindow):
             f"{actual_body}"
         )
         parts.append(
-            '<table width="100%" cellspacing="0" cellpadding="10" border="1"><tr>'
+            '<table width="100%" cellspacing="0" cellpadding="15" border="1"><tr>'
             f'<td width="50%" valign="top">{expected_cell}</td>'
             f'<td width="50%" valign="top" bgcolor="{style.PANEL_TINT}">{actual_cell}</td>'
             "</tr></table>"
