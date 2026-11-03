@@ -35,6 +35,14 @@ AUTHORIZED  requires explicit owner authorization before starting
 
 Detailed subtask history and commit SHAs live in Git, not here.
 
+## Prototype visual fidelity follow-up (implemented on branch; review pending)
+
+UI.1–UI.5 refine proportions, typography, import/review/management layout and
+structural layout tests. This is presentation polish over the existing
+prototype-parity implementation. Matching, extraction, persistence and
+worker lifecycle are unchanged. Windows screenshot inspection at 100% and
+125% remains NOT RUN; see [plan.md §6](plan.md) for evidence boundaries.
+
 ## Deferred validation (DEFERRED by owner for the v0.1 internal-demo milestone)
 
 These remain prerequisites before any production/pilot readiness claim. Do

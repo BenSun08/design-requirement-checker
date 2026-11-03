@@ -2367,6 +2367,7 @@ class TestPrototypeProportions:
         assert window._search_input.maximumWidth() <= 300
         row = window._result_list.itemWidget(window._result_list.currentItem())
         assert row.autoFillBackground()
+        assert row.backgroundRole() is QPalette.ColorRole.Window
         assert row.palette().color(QPalette.ColorRole.Window).name() == "#eaf1fb"
         window._result_list.setCurrentRow(1)
         assert row.palette().color(QPalette.ColorRole.Window).name() == "#ffffff"
@@ -2379,4 +2380,57 @@ class TestPrototypeProportions:
                 window._result_list.currentItem().data(Qt.ItemDataRole.UserRole).status
                 is CheckStatus.CONFIGURED
             )
+        window.close()
+
+    def test_compact_results_keep_controls_and_long_names_readable(self, qapp) -> None:
+        from PySide6.QtWidgets import QLabel
+
+        from design_requirement_checker.ui import style
+
+        style.apply_app_style(qapp)
+        long_name = "门控制与电源管理的完整工程功能名称" * 6
+        item = CheckItem(item_id="long", code="DC-001", name=long_name, detection_phrase="门控制")
+        result = CheckResult(
+            check_item=item,
+            document_id="doc-ui",
+            resolution=Resolution.RESOLVED,
+            status=CheckStatus.MISSING,
+            evidence=(),
+            comparison_state=ComparisonState.NOT_COMPARED,
+            comparison_reason="nothing-to-compare",
+            review_reasons=(),
+            rule_revision="r1",
+        )
+        window = _window_with_results(qapp, (result,))
+        window.show()
+        for width, height in ((1024, 600), (1440, 900)):
+            window.resize(width, height)
+            qapp.processEvents()
+            assert (window.width(), window.height()) == (width, height)
+            for control in (
+                *window._filter_buttons.values(),
+                window._search_input,
+                window._import_button,
+                window._run_button,
+                window._cancel_button,
+            ):
+                assert control.isVisible()
+                assert window.rect().contains(
+                    control.rect().translated(control.mapTo(window, control.rect().topLeft()))
+                )
+            row = window._result_list.itemWidget(window._result_list.item(0))
+            name = next(label for label in row.findChildren(QLabel) if label.text() == long_name)
+            assert name.wordWrap()
+            assert name.height() >= name.heightForWidth(name.width())
+            assert name.width() >= 100
+            assert window._result_list.horizontalScrollBar().maximum() == 0
+            if width == 1024:
+                search_top = window._search_input.mapTo(
+                    window, window._search_input.rect().topLeft()
+                ).y()
+                filters_bottom = max(
+                    button.mapTo(window, button.rect().bottomLeft()).y()
+                    for button in window._filter_buttons.values()
+                )
+                assert search_top > filters_bottom
         window.close()

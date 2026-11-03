@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QPalette, QShortcut
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, QTimer, QUrl
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QPalette, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -575,7 +576,7 @@ class MainWindow(QMainWindow):
         self._empty_card_layout = outer
         outer.setContentsMargins(24, 54, 24, 54)
         outer.setSpacing(10)
-        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.setAlignment(Qt.AlignmentFlag.AlignTop)
         symbol = QLabel("W")
         symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
         symbol.setStyleSheet(
@@ -651,6 +652,7 @@ class MainWindow(QMainWindow):
         for key, caption_text, color in stats:
             stat = QWidget()
             stat.setObjectName("summaryStat")
+            stat.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
             stat.setStyleSheet(f"#summaryStat {{ border-right: 1px solid {style.BORDER}; }}")
             stat_row = QHBoxLayout(stat)
             stat_row.setContentsMargins(16, 0, 16, 0)
@@ -665,7 +667,7 @@ class MainWindow(QMainWindow):
             caption.setStyleSheet(f"color: {style.MUTED};")
             stat_row.addWidget(value)
             stat_row.addWidget(caption)
-            row.addWidget(stat, 1)
+            row.addWidget(stat)
             self._summary_card_values[key] = value
         row.addStretch()
         note = QLabel("描述差异与配置状态独立统计")
@@ -689,7 +691,12 @@ class MainWindow(QMainWindow):
         # Filter buttons + search.
         self._current_filter = "全部"
         self._filter_buttons: dict[str, QPushButton] = {}
-        filter_row = QHBoxLayout()
+        filter_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self._filter_row = filter_row
+        filters = QWidget()
+        filter_buttons_row = QHBoxLayout(filters)
+        filter_buttons_row.setContentsMargins(0, 0, 0, 0)
+        filter_buttons_row.setSpacing(5)
         for name in ("全部", "仅异常", "已配置", "未配置", "已划除", "待人工核查"):
             btn = QPushButton(name)
             btn.setProperty("filter", True)
@@ -697,7 +704,8 @@ class MainWindow(QMainWindow):
             btn.setChecked(name == "全部")
             btn.clicked.connect(lambda _checked=False, n=name: self._set_filter(n))
             self._filter_buttons[name] = btn
-            filter_row.addWidget(btn)
+            filter_buttons_row.addWidget(btn)
+        filter_row.addWidget(filters)
         filter_row.addStretch()
         self._search_input = QLineEdit()
         self._search_input.setMinimumWidth(245)
@@ -734,6 +742,8 @@ class MainWindow(QMainWindow):
         list_layout.addWidget(pane_heading)
         self._result_list = QListWidget()
         self._result_list.setMinimumWidth(300)
+        self._result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._result_list.viewport().installEventFilter(self)
         list_layout.addWidget(self._result_list, 1)
 
         detail_pane = QWidget()
@@ -761,6 +771,43 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._splitter, 1)
         self._result_list.currentItemChanged.connect(self._on_result_selected)
         return area
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        compact = self.width() < 1200
+        self._summary_note.setVisible(not compact)
+        self._filter_row.setDirection(
+            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
+        )
+        self._filter_row.setAlignment(
+            self._search_input,
+            Qt.AlignmentFlag.AlignLeft if compact else Qt.AlignmentFlag.AlignRight,
+        )
+        # At 600 logical pixels high, retain all import controls by reducing
+        # whitespace, never by shrinking the text or the header/navigation.
+        short = self.height() < 720
+        self._empty_page_layout.setContentsMargins(0, 12 if short else 32, 0, 12 if short else 32)
+        self._empty_card_layout.setContentsMargins(24, 20 if short else 54, 24, 20 if short else 54)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self._result_list.viewport() and event.type() == QEvent.Type.Resize:
+            self._resize_result_rows()
+        return super().eventFilter(watched, event)
+
+    def _resize_result_rows(self) -> None:
+        """Reflow wrapped names when the user resizes either splitter pane."""
+        width = self._result_list.viewport().width()
+        for index in range(self._result_list.count()):
+            item = self._result_list.item(index)
+            row = self._result_list.itemWidget(item)
+            if row is not None:
+                layout = row.layout()
+                if layout is None:
+                    continue
+                height = layout.totalHeightForWidth(width)
+                # The item's bottom border consumes one logical pixel of
+                # its size hint outside the embedded row widget.
+                item.setSizeHint(QSize(width, max(69, height + 1)))
 
     # --- navigation (prototype: tabs, not a modal utility) -----------------
 
@@ -979,6 +1026,10 @@ class MainWindow(QMainWindow):
             row = self._build_result_row(result)
             list_item.setSizeHint(row.sizeHint())
             self._result_list.setItemWidget(list_item, row)
+            # QListWidget changes the embedded widget's role to Base;
+            # retain Window so the explicit selection surface is painted.
+            row.setBackgroundRole(QPalette.ColorRole.Window)
+        self._resize_result_rows()
         # Auto-select: keep the still-visible selection, else the first row.
         self._result_list.setCurrentRow(keep_row if keep_row is not None else 0)
 

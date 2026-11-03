@@ -96,8 +96,7 @@ class ChecklistPage(QWidget):
         subtitle.setStyleSheet(f"color: {style.MUTED}; font-size: {style.FONT_SECONDARY_PT}pt;")
         title_column.addWidget(title)
         title_column.addWidget(subtitle)
-        title_row.addLayout(title_column)
-        title_row.addStretch()
+        title_row.addLayout(title_column, 1)
         self._add_button = QPushButton("新增检查项")
         style.mark_primary(self._add_button)
         self._add_button.clicked.connect(self._on_add)
@@ -125,7 +124,7 @@ class ChecklistPage(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
-        self._table.verticalHeader().setMinimumSectionSize(50)
+        self._table.verticalHeader().setMinimumSectionSize(60)
         self._table.setWordWrap(True)
         self._table.setTextElideMode(Qt.TextElideMode.ElideNone)
         self._table.setShowGrid(False)
@@ -139,6 +138,10 @@ class ChecklistPage(QWidget):
         self._table.setColumnWidth(6, 204)
         for column, width in ((0, 90), (1, 150), (2, 90), (3, 140), (5, 64)):
             self._table.setColumnWidth(column, width)
+        self._row_height_timer = QTimer(self)
+        self._row_height_timer.setSingleShot(True)
+        self._row_height_timer.timeout.connect(self._table.resizeRowsToContents)
+        hdr.sectionResized.connect(lambda *_args: self._row_height_timer.start(0))
         self._populate_table()
         self._table.doubleClicked.connect(lambda _index: self._on_edit_selected())
         outer.addWidget(self._table, 1)
@@ -165,7 +168,7 @@ class ChecklistPage(QWidget):
         super().resizeEvent(event)
         # Column stretches settle after page geometry changes. Recalculate
         # wrapped row heights on the next event-loop turn, without delays.
-        QTimer.singleShot(0, self._table.resizeRowsToContents)
+        self._row_height_timer.start(0)
 
     # --- working-copy sync ---------------------------------------------------
 

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPlainTextEdit,
     QScrollArea,
@@ -68,17 +69,19 @@ class ItemEditorDialog(QDialog):
         # collect it (the prototype matches on the name instead).
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 20)
-        outer.setSpacing(12)
+        outer.setSpacing(8)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         form = QWidget()
+        form.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         scroll.setWidget(form)
         outer.addWidget(scroll, 1)
         body = QVBoxLayout(form)
+        body.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         body.setContentsMargins(0, 0, 8, 0)
-        body.setSpacing(10)
+        body.setSpacing(8)
 
         self._code_edit = QLineEdit(existing.code if existing else "")
         self._code_edit.setPlaceholderText("必填，例如 SYS-001")
@@ -103,6 +106,7 @@ class ItemEditorDialog(QDialog):
         self._expected_edit = QPlainTextEdit(existing.expected_description if existing else "")
         self._expected_edit.setPlaceholderText("选填，可粘贴多行期望描述")
         self._expected_edit.setMinimumHeight(96)
+        self._expected_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         expected_column = self._field("预期要求", self._expected_edit)
         hint = QLabel("留空时仅核查功能是否出现，不比较描述。")
         hint.setWordWrap(True)
@@ -117,6 +121,7 @@ class ItemEditorDialog(QDialog):
         self._aliases_edit = QTextEdit(alias_text)
         self._aliases_edit.setPlaceholderText("每行一个别名，可留空")
         self._aliases_edit.setMinimumHeight(64)
+        self._aliases_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._aliases_edit.setMaximumHeight(120)
         self._aliases_edit.setAcceptRichText(False)
         body.addLayout(self._field("别名（每行一个）", self._aliases_edit), 1)
@@ -124,6 +129,7 @@ class ItemEditorDialog(QDialog):
         # Prototype 备注 is a small textarea — notes can span lines.
         self._notes_edit = QPlainTextEdit(existing.notes if existing else "")
         self._notes_edit.setMinimumHeight(48)
+        self._notes_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._notes_edit.setMaximumHeight(72)
         body.addLayout(self._field("备注", self._notes_edit))
 
@@ -136,6 +142,7 @@ class ItemEditorDialog(QDialog):
         self._error_label = QLabel("")
         self._error_label.setStyleSheet(f"color: {style.ERROR_TEXT};")
         self._error_label.setWordWrap(True)
+        self._error_label.setVisible(False)
         outer.addWidget(self._error_label)
 
         # Prototype .dialog-actions — 取消 plus the primary 保存检查项.
@@ -181,8 +188,10 @@ class ItemEditorDialog(QDialog):
         if missing:
             # Inline alert (prototype #formError) — no modal needed.
             self._error_label.setText(f"请填写：{'、'.join(missing)}")
+            self._error_label.setVisible(True)
             return
         self._error_label.setText("")
+        self._error_label.setVisible(False)
 
         # --- Build candidate aliases ---
         raw_aliases = [

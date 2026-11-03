@@ -944,6 +944,10 @@ class TestPrototypeManagementLayout:
         assert table.rowHeight(0) > 60  # multiple readable lines, not a clipped single row
         for button in actions.findChildren(QPushButton):
             assert button.width() >= button.minimumSizeHint().width()
+            assert button.height() >= button.minimumSizeHint().height()
+            assert actions.rect().contains(
+                button.rect().translated(button.mapTo(actions, button.rect().topLeft()))
+            )
         page.close()
 
     def test_editor_scrolls_form_and_keeps_actions_reachable_at_minimum(self, qapp) -> None:
@@ -972,6 +976,46 @@ class TestPrototypeManagementLayout:
             scroll.viewport()
             .rect()
             .intersects(
+                dlg._notes_edit.rect().translated(
+                    dlg._notes_edit.mapTo(scroll.viewport(), dlg._notes_edit.rect().topLeft())
+                )
+            )
+        )
+        dlg.close()
+
+    def test_management_reflows_requirements_after_column_resize(self, qapp) -> None:
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
+
+        item = CheckItem(
+            item_id="long",
+            code="DC-001",
+            name="门控制",
+            detection_phrase="门控制",
+            expected_description="开关门延时功能需支持工程师维护的完整要求；" * 12,
+        )
+        page = ChecklistPage((item,))
+        page.resize(1392, 700)
+        page.show()
+        qapp.processEvents()
+        before = page._table.rowHeight(0)
+        page._table.setColumnWidth(1, 550)
+        qapp.processEvents()
+        assert page._table.rowHeight(0) > before
+        page.close()
+
+    def test_editor_default_size_shows_notes_without_scrolling(self, qapp) -> None:
+        from PySide6.QtWidgets import QScrollArea
+
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+
+        dlg = ItemEditorDialog()
+        dlg.show()
+        qapp.processEvents()
+        scroll = dlg.findChild(QScrollArea)
+        assert (
+            scroll.viewport()
+            .rect()
+            .contains(
                 dlg._notes_edit.rect().translated(
                     dlg._notes_edit.mapTo(scroll.viewport(), dlg._notes_edit.rect().topLeft())
                 )

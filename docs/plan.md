@@ -146,6 +146,23 @@ updated. No tag, no GitHub Release.
 The owner smoke check recorded no OS version, admin status, network state,
 endpoint-policy state or Python presence, and none may be inferred from it.
 
+**Prototype visual fidelity follow-up (2026-11-03, branch review pending).**
+The existing Qt architecture is retained. Scoped container styles remove
+unintended child borders, logical layout constraints restore prototype
+proportions, and explicit native-font point sizes remove platform-default
+type-size variation. The import card is capped at 800 logical pixels;
+compact layouts reflow search and wrapped rows rather than shrinking type.
+The multiline editor remains resizable with scrollable form content and
+reachable actions. Local macOS-host checks: full pytest **607 PASS**;
+Ruff, format, strict mypy, pip check and diff checks **PASS**. Structural
+layout tests cover 1024 × 600 and 1440 × 900; the nine focused layout tests
+also pass with `QT_SCALE_FACTOR=1.25`. Native macOS rendered inspection
+covers empty, imported, results, management and editor screens. Browser
+preview was unavailable in the agent environment; prototype comparison
+used the committed HTML/CSS/JavaScript and Qt captures. Windows rendered
+inspection, Windows 100%/125% DPI and Chinese IME operation remain **NOT RUN**.
+Branch CI is a separate required gate; local checks do not establish it.
+
 ## 7. Deferred release validation
 
 Deferred by the owner for the v0.1 internal-demo milestone — prerequisites
