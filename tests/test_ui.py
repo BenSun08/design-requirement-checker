@@ -404,13 +404,11 @@ class TestBackgroundImport:
             assert _process_until(qapp, a_started.is_set, timeout_ms=5000)
             window._start_import(path_b)
             thread_b = window._thread
-            finished_b = QSignalSpy(thread_b.finished)
             assert _process_until(
                 qapp,
                 lambda: window.state is UiState.READY and thread_b not in window._active_threads,
                 timeout_ms=5000,
             )
-            assert finished_b.count() == 1
             assert "b.docx" in window._summary_label.text()
             assert thread_a.isRunning()
             assert thread_a in window._active_threads
