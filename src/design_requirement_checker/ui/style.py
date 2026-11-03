@@ -29,6 +29,15 @@ FONT_FAMILIES: tuple[str, ...] = (
     "sans-serif",
 )
 
+# Browser pixels → points at the Windows reference DPI (96). Qt scales
+# points and logical layout dimensions for the active screen; no font files
+# or physical-pixel positioning are needed.
+FONT_BODY_PT = 10.5
+FONT_SECONDARY_PT = 9.0
+FONT_BRAND_PT = 14.25
+FONT_TITLE_PT = 17.25
+FONT_NUMBER_PT = 16.5
+
 # --- palette (prototype :root and component colors) -----------------------
 
 TEXT = "#243247"
@@ -112,6 +121,7 @@ QPushButton {{
     border: 1px solid #b9c4d1;
     border-radius: 4px;
     padding: 6px 12px;
+    min-height: 20px;
 }}
 QPushButton:hover {{ background: #edf3fb; border-color: #7f9bbd; }}
 QPushButton:disabled {{ color: {MUTED}; background: {CARD}; }}
@@ -185,10 +195,12 @@ QStatusBar {{
     background: {CARD};
     border-top: 1px solid {BORDER};
     color: {MUTED};
-    font-size: 12px;
+    font-size: {FONT_SECONDARY_PT}pt;
+    min-height: 32px;
+    padding: 0 18px;
 }}
 QStatusBar::item {{ border: 0; }}
-QStatusBar QLabel {{ color: {MUTED}; font-size: 12px; }}
+QStatusBar QLabel {{ color: {MUTED}; font-size: {FONT_SECONDARY_PT}pt; }}
 """
 
 
@@ -216,6 +228,7 @@ def apply_app_style(app: QApplication) -> None:
     """
     font = QFont()
     font.setFamilies(list(FONT_FAMILIES))
+    font.setPointSizeF(FONT_BODY_PT)
     app.setFont(font)
     palette = app.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor(BACKGROUND))

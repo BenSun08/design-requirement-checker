@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
         """The 文档核查 page: notices, document bar, empty/work areas."""
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 16, 24, 16)
+        layout.setContentsMargins(style.MARGIN_PAGE, 18, style.MARGIN_PAGE, 18)
         layout.setSpacing(12)
 
         # Persistent startup/recovery banner (backup / load error / schema).

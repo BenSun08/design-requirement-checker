@@ -2275,3 +2275,23 @@ class TestFooterAndResponsiveChecks:
         # The last row still carries its own action buttons.
         assert page._table.cellWidget(119, 6) is not None
         window.close()
+
+
+class TestPrototypeProportions:
+    """Layout contracts use logical sizes, never screenshot pixels."""
+
+    def test_body_type_and_controls_have_explicit_readable_scale(self, qapp) -> None:
+        from design_requirement_checker.ui import style
+
+        style.apply_app_style(qapp)
+        window = MainWindow(check_items=(_item(),))
+        window.show()
+        qapp.processEvents()
+        assert qapp.font().pointSizeF() == 10.5
+        assert window._import_button.height() >= 34
+        assert window._run_button.height() >= 34
+        assert window.statusBar().height() >= 32
+        page = window._pages.widget(0)
+        margins = page.layout().contentsMargins()
+        assert (margins.left(), margins.top(), margins.right()) == (24, 18, 24)
+        window.close()
