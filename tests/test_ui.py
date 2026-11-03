@@ -7,9 +7,12 @@ failure — with only implemented operations enabled.
 
 import threading
 import time
+import weakref
 
 import fixture_factory as fixtures
+import pytest
 from PySide6.QtGui import QTextDocument
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QPushButton
 
 from design_requirement_checker.application import (
@@ -295,8 +298,8 @@ class TestUiLifecycle:
 
 
 def _process_until(qapp, predicate, timeout_ms: int = 2000) -> bool:
-    deadline = time.time() + timeout_ms / 1000
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
         qapp.processEvents()
         if predicate():
             return True
@@ -304,9 +307,30 @@ def _process_until(qapp, predicate, timeout_ms: int = 2000) -> bool:
     return False
 
 
+@pytest.fixture
+def worker_window(qapp, monkeypatch):
+    """Own background-work windows until all their threads retire.
+
+    The monkeypatch dependency keeps fakes installed until workers exit.
+    Blocking fakes must still release their Events in the test's finally.
+    """
+    windows = []
+
+    def create(**kwargs):
+        window = MainWindow(**kwargs)
+        windows.append(window)
+        return window
+
+    yield create
+    for window in windows:
+        window.close()
+        assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
+    qapp.processEvents()
+
+
 class TestBackgroundImport:
-    def test_start_import_sets_importing_state(self, qapp) -> None:
-        window = MainWindow()
+    def test_start_import_sets_importing_state(self, qapp, worker_window) -> None:
+        window = worker_window()
         window._start_import("/fake/path.docx")
         assert window.state is UiState.IMPORTING
         assert window._import_button.isEnabled() is False
@@ -344,9 +368,9 @@ class TestBackgroundImport:
         assert window.results == ()
         window.close()
 
-    def test_import_runs_off_ui_thread(self, qapp, tmp_path) -> None:
+    def test_import_runs_off_ui_thread(self, qapp, tmp_path, worker_window) -> None:
         path = fixtures.build_normal(tmp_path / "normal.docx")
-        window = MainWindow()
+        window = worker_window()
         window._start_import(str(path))
         assert window.state is UiState.IMPORTING
         assert _process_until(qapp, lambda: window.state is UiState.READY)
@@ -360,95 +384,122 @@ class TestBackgroundImport:
 
         path_a = str(tmp_path / "a.docx")
         path_b = str(fixtures.build_normal(tmp_path / "b.docx"))
+        a_started = threading.Event()
         a_release = threading.Event()
 
         def fake_import(path):
             if path == path_a:
-                a_release.wait(timeout=5)
+                a_started.set()
+                a_release.wait()
                 return ImportFailure("a.docx", "file-access-error", "stale")
             return import_document(path)
 
         monkeypatch.setattr(app_mod, "import_document", fake_import)
 
         window = MainWindow()
-        window._start_import(path_a)  # A blocks
-        thread_a = window._thread
-        # Let A's worker reach a_release.wait() so set() actually wakes it.
-        time.sleep(0.2)
-        qapp.processEvents()
-        window._start_import(path_b)  # B completes fast
-        assert _process_until(qapp, lambda: window.state is UiState.READY)
-        assert "b.docx" in window._summary_label.text()
-        a_release.set()  # let the stale A finish
-        _process_until(qapp, lambda: True, timeout_ms=500)  # drain queued signals
-        # A must not replace B.
-        assert "b.docx" in window._summary_label.text()
-        # Wait for A's thread to exit so close() doesn't leave it running.
-        thread_a.quit()
-        deadline = time.time() + 3.0
-        while thread_a.isRunning() and time.time() < deadline:
-            qapp.processEvents()
-            time.sleep(0.01)
-        qapp.processEvents()
-        window.close()
+        try:
+            window._start_import(path_a)
+            thread_a = window._thread
+            finished_a = QSignalSpy(thread_a.finished)
+            assert _process_until(qapp, a_started.is_set, timeout_ms=5000)
+            window._start_import(path_b)
+            thread_b = window._thread
+            assert _process_until(
+                qapp,
+                lambda: window.state is UiState.READY and thread_b not in window._active_threads,
+                timeout_ms=5000,
+            )
+            assert "b.docx" in window._summary_label.text()
+            assert thread_a.isRunning()
+            assert thread_a in window._active_threads
+            assert window._thread is None
+            a_release.set()
+            assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
+            assert finished_a.count() == 1
+            # Check after A's actual completion and ownership cleanup, not
+            # after a predicate that returns True on the first event pass.
+            assert window.state is UiState.READY
+            assert "b.docx" in window._summary_label.text()
+            assert window._thread is None
+            assert window._worker is None
+            assert not window._thread_for_generation
+            assert not window._worker_for_thread
+        finally:
+            # quit() cannot interrupt a Python Event.wait(). Always release
+            # the fake, even when an assertion above fails.
+            a_release.set()
+            window.close()
+            assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
 
     def test_stale_import_does_not_clear_current_thread_refs(
         self, qapp, tmp_path, monkeypatch
     ) -> None:
-        from PySide6.QtCore import QThread
-
         import design_requirement_checker.application as app_mod
 
         path_a = str(tmp_path / "a.docx")
         path_b = str(fixtures.build_normal(tmp_path / "b.docx"))
+        a_started = threading.Event()
         a_release = threading.Event()
+        b_started = threading.Event()
+        b_release = threading.Event()
 
         def fake_import(path):
             if path == path_a:
-                a_release.wait(timeout=5)
+                a_started.set()
+                a_release.wait()
                 return ImportFailure("a.docx", "file-access-error", "stale")
+            b_started.set()
+            b_release.wait()
             return import_document(path)
 
         monkeypatch.setattr(app_mod, "import_document", fake_import)
 
         window = MainWindow()
-        window._start_import(path_a)  # A blocks
-        thread_a = window._thread
-        # Let A's worker reach a_release.wait() so set() actually wakes it.
-        time.sleep(0.2)
-        qapp.processEvents()
-        window._start_import(path_b)  # B completes fast; replaces current refs
-        assert _process_until(qapp, lambda: window.state is UiState.READY)
-        # B's normal completion clears the current refs.
-        assert window._thread is None
-        a_release.set()  # let the stale A finish
-        _process_until(qapp, lambda: True, timeout_ms=800)  # drain queued signals
-        # Stale A must not have overwritten B's document.
-        assert "b.docx" in window._summary_label.text()
-        # A's worker has finished and (via direct connection) quit its thread.
-        # Wait for the thread to actually exit before removing its reference.
-        thread_a.quit()
-        deadline = time.time() + 3.0
-        while thread_a.isRunning() and time.time() < deadline:
-            qapp.processEvents()
-            time.sleep(0.01)
-        assert not thread_a.isRunning()
-        qapp.processEvents()  # drain thread.finished -> _on_thread_finished
+        try:
+            window._start_import(path_a)
+            thread_a = window._thread
+            finished_a = QSignalSpy(thread_a.finished)
+            assert _process_until(qapp, a_started.is_set, timeout_ms=5000)
+            window._start_import(path_b)
+            thread_b = window._thread
+            worker_b = weakref.ref(window._worker)
+            generation_b = window._op_generation
+            finished_b = QSignalSpy(thread_b.finished)
+            assert _process_until(qapp, b_started.is_set, timeout_ms=5000)
+            assert thread_a in window._active_threads
+            assert thread_b in window._active_threads
 
-        # Simulate a newer operation holding the current thread/worker refs.
-        newer_thread = QThread()
-        window._thread = newer_thread
-        window._worker = object()
-        window._op_generation = 99
-        # A late A finish with a stale generation must not clear current refs
-        # and must return False.
-        a_failure = ImportFailure("a.docx", "file-access-error", "stale")
-        applied = window._on_import_finished(a_failure, 1)
-        assert applied is False
-        assert window._thread is newer_thread
-        # A's thread was already removed by its finished signal.
-        assert thread_a not in window._active_threads
-        window.close()
+            # Deliver stale A while a real newer worker B is still blocked.
+            a_release.set()
+            assert _process_until(
+                qapp, lambda: thread_a not in window._active_threads, timeout_ms=5000
+            )
+            assert finished_a.count() == 1
+            assert window.state is UiState.IMPORTING
+            assert window._document is None
+            assert window._thread is thread_b
+            assert window._worker is worker_b()
+            assert window._thread_for_generation == {generation_b: thread_b}
+            assert thread_b.isRunning()
+            assert window._active_threads == [thread_b]
+
+            b_release.set()
+            assert _process_until(
+                qapp,
+                lambda: window.state is UiState.READY and not window._active_threads,
+                timeout_ms=5000,
+            )
+            assert finished_b.count() == 1
+            assert "b.docx" in window._summary_label.text()
+            assert window._thread is None
+            assert window._worker is None
+            assert not window._thread_for_generation
+            assert not window._worker_for_thread
+        finally:
+            a_release.set()
+            b_release.set()
+            window.close()
+            assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
 
     def test_on_thread_finished_removes_exact_thread(self, qapp) -> None:
         from PySide6.QtCore import QThread
@@ -465,6 +516,54 @@ class TestBackgroundImport:
         window._on_thread_finished(t1)
         assert window._active_threads == []
         window.close()
+
+    @pytest.mark.parametrize("operation", ["import", "verification"])
+    def test_worker_owned_until_thread_retirement(
+        self, qapp, tmp_path, monkeypatch, operation
+    ) -> None:
+        """Result delivery must not drop the worker before its thread retires.
+
+        Hold the thread after its event loop exits but before QThread.finished
+        can schedule worker deletion. This exposes the ownership gap without
+        relying on a Windows native crash or a timed sleep.
+        """
+        from PySide6.QtCore import QThread
+
+        import design_requirement_checker.ui.main_window as window_mod
+
+        retiring = threading.Event()
+        release = threading.Event()
+
+        class RetiringThread(QThread):
+            def run(self):
+                super().run()
+                retiring.set()
+                release.wait()
+
+        monkeypatch.setattr(window_mod, "QThread", RetiringThread)
+        path = fixtures.build_normal(tmp_path / "normal.docx")
+        window = MainWindow(check_items=(_item(),))
+        try:
+            if operation == "import":
+                window._start_import(str(path))
+                final_state = UiState.READY
+            else:
+                window.set_document(import_document(path))
+                window._on_run_clicked()
+                final_state = UiState.COMPLETED
+            thread = window._thread
+            worker = weakref.ref(window._worker)
+            assert _process_until(qapp, lambda: retiring.is_set() and window.state is final_state)
+            assert thread.isRunning()
+            assert thread in window._active_threads
+            assert window._worker is None  # current operation has completed
+            assert worker() is not None, "worker must stay owned until its QThread retires"
+        finally:
+            release.set()
+            assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
+            window.close()
+        assert not window._worker_for_thread
+        assert worker() is None
 
     def test_on_thread_finished_joins_thread_before_releasing_ownership(self, qapp) -> None:
         """``QThread.finished`` is emitted *before* the OS thread terminates,
@@ -491,12 +590,14 @@ class TestBackgroundImport:
         assert not thread.isRunning()
         window.close()
 
-    def test_verification_release_implies_retired_thread_terminated(self, qapp, tmp_path) -> None:
+    def test_verification_release_implies_retired_thread_terminated(
+        self, qapp, tmp_path, worker_window
+    ) -> None:
         """End-to-end invariant the startup subprocess test relies on: once
         ``_active_threads`` is empty after a real verification run, the
         retired thread has fully terminated and is safe to destroy."""
         document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
-        window = MainWindow(check_items=(_item(),))
+        window = worker_window(check_items=(_item(),))
         window.set_document(document)
         window._on_run_clicked()
         retired = window._thread
@@ -526,8 +627,8 @@ def _completed_outcome(document: Document) -> VerificationOutcome:
 
 
 class TestBackgroundVerification:
-    def test_run_sets_verifying_state(self, qapp) -> None:
-        window = MainWindow(check_items=(_item(),))
+    def test_run_sets_verifying_state(self, qapp, worker_window) -> None:
+        window = worker_window(check_items=(_item(),))
         window.set_document(_document(_block("body:p0", "功能")))
         window._on_run_clicked()
         assert window.state is UiState.VERIFYING
@@ -618,9 +719,9 @@ class TestBackgroundVerification:
         assert window.results == ()
         window.close()
 
-    def test_verification_runs_in_background(self, qapp, tmp_path) -> None:
+    def test_verification_runs_in_background(self, qapp, tmp_path, worker_window) -> None:
         document = import_document(fixtures.build_normal(tmp_path / "normal.docx"))
-        window = MainWindow(check_items=(_item("a", "plain"),))
+        window = worker_window(check_items=(_item("a", "plain"),))
         window.set_document(document)
         window._on_run_clicked()
         assert window.state is UiState.VERIFYING
@@ -707,14 +808,16 @@ class TestWorkerFailure:
         assert generation == 5
         assert "Traceback" not in detail
 
-    def test_import_exception_drives_ui_failed_state(self, qapp, monkeypatch) -> None:
+    def test_import_exception_drives_ui_failed_state(
+        self, qapp, monkeypatch, worker_window
+    ) -> None:
         import design_requirement_checker.application as app_mod
 
         def boom(_path):
             raise RuntimeError("cannot read")
 
         monkeypatch.setattr(app_mod, "import_document", boom)
-        window = MainWindow()
+        window = worker_window()
         window._start_import("/fake.docx")
         assert _process_until(qapp, lambda: window.state is UiState.FAILED)
         assert window._progress.isVisible() is False
@@ -723,7 +826,9 @@ class TestWorkerFailure:
         assert window._thread is None or not window._thread.isRunning()
         window.close()
 
-    def test_verification_exception_drives_ui_failed_state(self, qapp, monkeypatch) -> None:
+    def test_verification_exception_drives_ui_failed_state(
+        self, qapp, monkeypatch, worker_window
+    ) -> None:
         import design_requirement_checker.application as app_mod
 
         def boom(_doc, _items, cancel_check=None):
@@ -731,7 +836,7 @@ class TestWorkerFailure:
 
         monkeypatch.setattr(app_mod, "verify_document", boom)
         document = _document(_block("body:p0", "功能"))
-        window = MainWindow(check_items=(_item(),))
+        window = worker_window(check_items=(_item(),))
         window.set_document(document)
         window._on_run_clicked()
         assert _process_until(qapp, lambda: window.state is UiState.FAILED)

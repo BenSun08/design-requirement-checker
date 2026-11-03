@@ -163,6 +163,33 @@ used the committed HTML/CSS/JavaScript and Qt captures. Windows rendered
 inspection, Windows 100%/125% DPI and Chinese IME operation remain **NOT RUN**.
 Branch CI is a separate required gate; local checks do not establish it.
 
+**Windows pytest regression follow-up (2026-11-03; review pending).**
+Pre-fix Windows/Python 3.13 probes independently reproduced the first-launch
+assertion with a populated synthetic baseline, a standalone workflow exit
+`0xC0000409`, and an access violation during import-thread retirement before
+verification or window close ([diagnostics](https://github.com/BenSun08/design-requirement-checker/actions/runs/41640458057)).
+A controlled retirement barrier reproduced premature worker destruction for
+both import and verification: clearing the current-operation pointer could
+drop the worker while its thread remained owned and running. Each worker is
+now retained by thread identity until the existing termination join completes.
+Generation checks, cancellation and deferred close semantics are preserved.
+First-launch tests explicitly use an absent temporary baseline and inspect
+named actions on the visible page. Stale-import tests synchronize both
+completion orders with Events and await finished signals and ownership
+cleanup; failure paths release blocked fakes before teardown.
+
+Local macOS checks: startup **5 PASS**, UI **136 PASS**, full pytest **609
+PASS**; Ruff, formatting, mypy, pip check and diff checks **PASS**. At the
+production-fix revision `667c614`, both platform CI jobs
+[passed](https://github.com/BenSun08/design-requirement-checker/actions/runs/41641231285),
+and a separate Windows diagnostic run passed **20 workflow repetitions** and
+**five full-suite repetitions of 609 tests**
+([evidence](https://github.com/BenSun08/design-requirement-checker/actions/runs/41641231296)).
+These repetitions precede the final teardown-test refinements; final branch
+CI is reported separately in the PR. The temporary diagnostic workflow was
+removed after collecting evidence. Windows rendered GUI and formal deployment
+validation remain **NOT RUN**.
+
 ## 7. Deferred release validation
 
 Deferred by the owner for the v0.1 internal-demo milestone — prerequisites

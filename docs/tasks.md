@@ -43,6 +43,16 @@ prototype-parity implementation. Matching, extraction, persistence and
 worker lifecycle are unchanged. Windows screenshot inspection at 100% and
 125% remains NOT RUN; see [plan.md §6](plan.md) for evidence boundaries.
 
+## Windows pytest regression follow-up (implemented on branch; review pending)
+
+First-launch startup tests use temporary baseline storage and visible-action
+assertions. A reproduced worker-retirement ownership gap is fixed for import
+and verification. Stale-import tests now synchronize actual completion orders
+and guarantee release of blocking fakes before teardown. Local checks and
+Windows repetition evidence are recorded in [plan.md §6](plan.md); final
+branch CI is reported in the PR. This maintenance slice does not start Task 6
+or Task 7.
+
 ## Deferred validation (DEFERRED by owner for the v0.1 internal-demo milestone)
 
 These remain prerequisites before any production/pilot readiness claim. Do

@@ -383,6 +383,10 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: ImportWorker | VerificationWorker | None = None
         self._active_threads: list[QThread] = []
+        #: Retain every worker until its thread has fully terminated. The
+        #: current-operation pointer may be cleared while Qt still deletes
+        #: the worker in its owning thread during native teardown.
+        self._worker_for_thread: dict[QThread, ImportWorker | VerificationWorker] = {}
         #: Thread owned by each operation generation, so a stale completion can
         #: still quit exactly its own thread without touching current refs.
         self._thread_for_generation: dict[int, QThread] = {}
@@ -1499,6 +1503,7 @@ class MainWindow(QMainWindow):
         generation so handlers can quit exactly their own thread.
         """
         self._thread_for_generation[generation] = thread
+        self._worker_for_thread[thread] = worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(finished_handler)
@@ -1529,6 +1534,7 @@ class MainWindow(QMainWindow):
         schedule a non-reentrant close retry on the UI event loop.
         """
         thread.wait()
+        self._worker_for_thread.pop(thread, None)
         if thread in self._active_threads:
             self._active_threads.remove(thread)
         # Clean thread_for_generation by identity in case the generation-based
@@ -1547,6 +1553,8 @@ class MainWindow(QMainWindow):
         Safe for both current and stale completions: only the thread registered
         for ``generation`` is quit, and ``self._thread``/``self._worker`` are
         cleared only when they still refer to this operation.
+        Worker lifetime remains owned by _worker_for_thread until the
+        corresponding thread has fully terminated.
         """
         thread = self._thread_for_generation.pop(generation, None)
         if thread is not None:

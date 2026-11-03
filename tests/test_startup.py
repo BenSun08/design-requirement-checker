@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import indent
 
 from design_requirement_checker.baseline_store import save_baseline
 from design_requirement_checker.domain import CheckItem
@@ -32,25 +33,36 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 import design_requirement_checker.__main__ as entry
+import design_requirement_checker.baseline_store as store
 
 baseline_file = Path(os.environ["TEST_BASELINE_PATH"])
 entry.default_path = lambda: baseline_file
+store.default_path = lambda: baseline_file
 
 app = QApplication([])
 created = []
+failures = []
 
-def close_window():
-    for window in app.topLevelWidgets():
-        if window.isVisible():
-            created.append(window)
+def inspect_and_close():
+    windows = [w for w in app.topLevelWidgets() if w.isVisible()]
+    try:
+        assert len(windows) == 1, "Startup must show one main window"
+        window = windows[0]
+        created.append(window)
+{indent(assertions.strip(), "        ")}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        failures.append(repr(exc))
+    finally:
+        for window in windows:
             window.close()
-    app.quit()
+        app.quit()
 
-QTimer.singleShot(100, close_window)
+QTimer.singleShot(0, inspect_and_close)
 assert entry.main([]) == 0
+assert not failures, failures
 assert len(created) == 1, "Startup must show one main window"
-window = created[0]
-{assertions}
 print("STARTUP-OK")
 """
     return subprocess.run(
@@ -160,17 +172,40 @@ import fixture_factory
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 import design_requirement_checker.__main__ as entry
+import design_requirement_checker.baseline_store as store
 
 docx_file = Path(os.environ["TEST_DOCX_PATH"])
 fixture_factory.build_normal(docx_file)
 
 baseline_file = Path(os.environ["TEST_BASELINE_PATH"])
 entry.default_path = lambda: baseline_file
+store.default_path = lambda: baseline_file
 
 app = QApplication([])
 created = []
 stage = {{"name": "startup"}}
 failure = []
+
+def record_stage(name, window):
+    stage["name"] = name
+    print("WORKFLOW", name, "state=", window.state.name, "threads=",
+          [(t.isRunning(), t.isFinished()) for t in window._active_threads], flush=True)
+
+def stop_when_retired():
+    # Failure paths must also preserve QApplication/window until all owned
+    # workers finish. quit() requests loop exit; it cannot interrupt Python.
+    window = created[0] if created else None
+    if window is not None and window._active_threads:
+        if window._cancel_event is not None:
+            window._cancel_event.set()
+        for thread in window._active_threads:
+            thread.quit()
+        QTimer.singleShot(10, stop_when_retired)
+        return
+    if window is not None:
+        record_stage("retired", window)
+        window.close()
+    app.quit()
 
 def find_window():
     for w in app.topLevelWidgets():
@@ -182,56 +217,62 @@ def step_import():
     try:
         window = find_window()
         assert window is not None
+        created.append(window)
         assert window._baseline_load_state == "normal"
+        record_stage("startup", window)
         window._start_import(str(docx_file))
         assert window.state.name == "IMPORTING"
-        stage["name"] = "importing"
+        record_stage("importing", window)
         QTimer.singleShot(50, poll_ready)
     except Exception as exc:  # noqa: BLE001
         failure.append(("import", repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 def poll_ready():
     try:
         window = find_window()
+        assert window.state.name != "FAILED", window._summary_label.text()
         if window.state.name != "READY":
             QTimer.singleShot(50, poll_ready)
             return
         assert window._document is not None
-        stage["name"] = "ready"
+        record_stage("ready", window)
         window._on_run_clicked()
         assert window.state.name == "VERIFYING"
-        stage["name"] = "verifying"
+        record_stage("verifying", window)
         QTimer.singleShot(50, poll_completed)
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 def poll_completed():
     try:
         window = find_window()
+        assert window.state.name != "FAILED", window._summary_label.text()
         if window.state.name != "COMPLETED":
             QTimer.singleShot(50, poll_completed)
             return
         assert len(window._results) == 1
         assert window._results[0].status.name == "CONFIGURED"
-        stage["name"] = "completed"
+        if stage["name"] != "completed":
+            record_stage("completed", window)
         # Do not tear down while a worker QThread is still alive: closing or
         # quitting mid-teardown races the thread's deleteLater cleanup and
         # fast-fails the process on Windows (0xC0000409).
         if window._active_threads:
             QTimer.singleShot(50, poll_completed)
             return
-        window.close()
-        app.quit()
+        stop_when_retired()
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 QTimer.singleShot(150, step_import)
 rc = entry.main([])
 assert not failure, f"workflow failed at {{failure}}"
-assert stage["name"] == "completed", stage["name"]
+assert stage["name"] == "retired", stage["name"]
+assert created[0].state.name == "COMPLETED"
+assert not created[0]._active_threads
 print("WORKFLOW-OK rc=", rc)
 """
         result = subprocess.run(
@@ -241,49 +282,59 @@ print("WORKFLOW-OK rc=", rc)
                 "QT_QPA_PLATFORM": "offscreen",
                 "TEST_BASELINE_PATH": str(baseline_path),
                 "TEST_DOCX_PATH": str(docx_path),
+                "PYTHONFAULTHANDLER": "1",
             },
             capture_output=True,
             text=True,
             timeout=60,
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 0, (
+            f"return code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
         assert "WORKFLOW-OK" in result.stdout
 
 
-def test_startup_shows_window_and_exits_when_closed() -> None:
+def test_startup_shows_window_and_exits_when_closed(tmp_path) -> None:
     # Catch a missing show(), broken composition, or event loop that never exits.
-    script = """
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QPushButton
-from design_requirement_checker.__main__ import main
+    # First launch explicitly means neither the temporary primary nor backup
+    # exists. Never read or delete a developer's actual AppData baseline.
+    assert not (tmp_path / "baseline.json").exists()
+    assert not (tmp_path / "baseline.json.bak").exists()
+    result = _run_startup_script(
+        tmp_path,
+        """
+assert window._baseline_load_state == "no-baseline"
+assert window._check_items == ()
+assert window._management_page._table.rowCount() == 0
+assert window._pages.currentIndex() == 0
+assert window._pages.currentWidget().isVisible()
+assert window._workspace_stack.currentIndex() == 0
+assert window._workspace_stack.currentWidget().isVisible()
+assert not window._management_page.isVisible()
 
-app = QApplication([])
-observed = []
-enabled_actions = []
-filter_labels = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常",
-                 "新增检查项", "编辑", "切换启用/禁用", "删除", "保存基准", "返回文档核查"}
-def inspect_and_close():
-    windows = [w for w in app.topLevelWidgets() if w.isVisible()]
-    observed.extend(windows)
-    for window in windows:
-        enabled_actions.extend(
-            button.text() for button in window.findChildren(QPushButton)
-            if button.isEnabled() and button.text() not in filter_labels
-        )
-        window.close()
-    app.quit()
+for button, label, enabled in (
+    (window._import_button, "选择 DOCX", True),
+    (window._empty_import_button, "选择 DOCX 文件", True),
+    (window._run_button, "开始核查", False),
+    (window._cancel_button, "取消核查", False),
+):
+    assert button.text() == label
+    assert button.isVisible(), label
+    assert button.isEnabled() is enabled, label
 
-QTimer.singleShot(100, inspect_and_close)
-assert main([]) == 0
-assert len(observed) == 1, "Startup must show one main window"
-assert sorted(enabled_actions) == ["选择 DOCX", "选择 DOCX 文件"], \\
-       "Only implemented operations may be enabled"
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
-        capture_output=True,
-        text=True,
-        timeout=15,
+assert window._nav_tabs.isVisible()
+assert window._nav_tabs.currentIndex() == 0
+assert window._nav_tabs.isTabEnabled(0)
+assert window._nav_tabs.isTabEnabled(1)
+window._nav_tabs.setCurrentIndex(1)
+assert window._pages.currentWidget() is window._management_page
+assert window._management_page.isVisible()
+assert not window._empty_import_button.isVisible()
+window._nav_tabs.setCurrentIndex(0)
+assert window._pages.currentIndex() == 0
+assert window._empty_import_button.isVisible()
+assert not window._management_page.isVisible()
+""",
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "STARTUP-OK" in result.stdout
