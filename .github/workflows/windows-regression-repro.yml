@@ -86,11 +86,14 @@ jobs:
                   return result
               monkeypatch.setattr(subprocess, "run", observed)
           ''', encoding="utf-8")
-          env = {**os.environ, "PYTHONPATH": str(probe), "PYTEST_PLUGINS": "windows_probe", "PYTHONUNBUFFERED": "1"}
-          run([sys.executable, "-m", "pytest", "tests/test_startup.py", "-vv", "-s"], env)
+          env = {**os.environ, "PYTHONPATH": str(probe), "PYTEST_PLUGINS": "windows_probe", "PYTHONUNBUFFERED": "1", "PYTHONFAULTHANDLER": "1"}
+          for attempt in range(20):
+              print("WORKFLOW DIAGNOSTIC ATTEMPT", attempt + 1, flush=True)
+              if run([sys.executable, "-m", "pytest", "tests/test_startup.py::TestImportWorkflowStaysAlive::test_startup_then_import_then_verify_keeps_process_alive", "-vv", "-s"], env):
+                  break
           env.update(PROBE_POPULATED="1", PROBE_BASELINE=str(probe / "baseline.json"))
           run([sys.executable, "-m", "pytest", "tests/test_startup.py::test_startup_shows_window_and_exits_when_closed", "-vv", "-s"], env)
-          for attempt in range(10):
-              print("UI ATTEMPT", attempt + 1, flush=True)
-              if run([sys.executable, "-m", "pytest", "tests/test_ui.py::TestBackgroundImport", "-vv", "-s"]):
+          for attempt in range(5):
+              print("FULL SUITE ATTEMPT", attempt + 1, flush=True)
+              if run([sys.executable, "-m", "pytest", "-vv", "-s"], {**os.environ, "PYTHONFAULTHANDLER": "1"}):
                   break
