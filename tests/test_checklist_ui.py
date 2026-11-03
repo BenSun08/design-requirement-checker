@@ -984,6 +984,8 @@ class TestPrototypeManagementLayout:
         dlg.close()
 
     def test_management_reflows_requirements_after_column_resize(self, qapp) -> None:
+        from PySide6.QtCore import QDeadlineTimer, QEventLoop
+
         from design_requirement_checker.ui.checklist_page import ChecklistPage
 
         item = CheckItem(
@@ -999,7 +1001,12 @@ class TestPrototypeManagementLayout:
         qapp.processEvents()
         before = page._table.rowHeight(0)
         page._table.setColumnWidth(1, 550)
-        qapp.processEvents()
+        # Header stretching and the queued row-height timer can take more
+        # than one event-loop turn on Windows. Wait for the visible result,
+        # not a particular timer order or an arbitrary sleep duration.
+        deadline = QDeadlineTimer(2000)
+        while page._table.rowHeight(0) <= before and not deadline.hasExpired():
+            qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
         assert page._table.rowHeight(0) > before
         page.close()
 
