@@ -172,17 +172,40 @@ import fixture_factory
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 import design_requirement_checker.__main__ as entry
+import design_requirement_checker.baseline_store as store
 
 docx_file = Path(os.environ["TEST_DOCX_PATH"])
 fixture_factory.build_normal(docx_file)
 
 baseline_file = Path(os.environ["TEST_BASELINE_PATH"])
 entry.default_path = lambda: baseline_file
+store.default_path = lambda: baseline_file
 
 app = QApplication([])
 created = []
 stage = {{"name": "startup"}}
 failure = []
+
+def record_stage(name, window):
+    stage["name"] = name
+    print("WORKFLOW", name, "state=", window.state.name, "threads=",
+          [(t.isRunning(), t.isFinished()) for t in window._active_threads], flush=True)
+
+def stop_when_retired():
+    # Failure paths must also preserve QApplication/window until all owned
+    # workers finish. quit() requests loop exit; it cannot interrupt Python.
+    window = created[0] if created else None
+    if window is not None and window._active_threads:
+        if window._cancel_event is not None:
+            window._cancel_event.set()
+        for thread in window._active_threads:
+            thread.quit()
+        QTimer.singleShot(10, stop_when_retired)
+        return
+    if window is not None:
+        record_stage("retired", window)
+        window.close()
+    app.quit()
 
 def find_window():
     for w in app.topLevelWidgets():
@@ -194,56 +217,62 @@ def step_import():
     try:
         window = find_window()
         assert window is not None
+        created.append(window)
         assert window._baseline_load_state == "normal"
+        record_stage("startup", window)
         window._start_import(str(docx_file))
         assert window.state.name == "IMPORTING"
-        stage["name"] = "importing"
+        record_stage("importing", window)
         QTimer.singleShot(50, poll_ready)
     except Exception as exc:  # noqa: BLE001
         failure.append(("import", repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 def poll_ready():
     try:
         window = find_window()
+        assert window.state.name != "FAILED", window._summary_label.text()
         if window.state.name != "READY":
             QTimer.singleShot(50, poll_ready)
             return
         assert window._document is not None
-        stage["name"] = "ready"
+        record_stage("ready", window)
         window._on_run_clicked()
         assert window.state.name == "VERIFYING"
-        stage["name"] = "verifying"
+        record_stage("verifying", window)
         QTimer.singleShot(50, poll_completed)
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 def poll_completed():
     try:
         window = find_window()
+        assert window.state.name != "FAILED", window._summary_label.text()
         if window.state.name != "COMPLETED":
             QTimer.singleShot(50, poll_completed)
             return
         assert len(window._results) == 1
         assert window._results[0].status.name == "CONFIGURED"
-        stage["name"] = "completed"
+        if stage["name"] != "completed":
+            record_stage("completed", window)
         # Do not tear down while a worker QThread is still alive: closing or
         # quitting mid-teardown races the thread's deleteLater cleanup and
         # fast-fails the process on Windows (0xC0000409).
         if window._active_threads:
             QTimer.singleShot(50, poll_completed)
             return
-        window.close()
-        app.quit()
+        stop_when_retired()
     except Exception as exc:  # noqa: BLE001
         failure.append((stage["name"], repr(exc)))
-        app.quit()
+        stop_when_retired()
 
 QTimer.singleShot(150, step_import)
 rc = entry.main([])
 assert not failure, f"workflow failed at {{failure}}"
-assert stage["name"] == "completed", stage["name"]
+assert stage["name"] == "retired", stage["name"]
+assert created[0].state.name == "COMPLETED"
+assert not created[0]._active_threads
 print("WORKFLOW-OK rc=", rc)
 """
         result = subprocess.run(
@@ -253,12 +282,15 @@ print("WORKFLOW-OK rc=", rc)
                 "QT_QPA_PLATFORM": "offscreen",
                 "TEST_BASELINE_PATH": str(baseline_path),
                 "TEST_DOCX_PATH": str(docx_path),
+                "PYTHONFAULTHANDLER": "1",
             },
             capture_output=True,
             text=True,
             timeout=60,
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 0, (
+            f"return code: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
         assert "WORKFLOW-OK" in result.stdout
 
 
