@@ -2295,3 +2295,56 @@ class TestPrototypeProportions:
         margins = page.layout().contentsMargins()
         assert (margins.left(), margins.top(), margins.right()) == (24, 18, 24)
         window.close()
+
+    def test_shell_and_empty_card_are_bounded_at_both_window_sizes(self, qapp) -> None:
+        from PySide6.QtWidgets import QWidget
+
+        from design_requirement_checker.ui import style
+
+        style.apply_app_style(qapp)
+        window = MainWindow(check_items=(_item(),))
+        window.show()
+        for width, height in ((1440, 900), (1024, 600)):
+            window.resize(width, height)
+            qapp.processEvents()
+            header = window.findChild(QWidget, "appHeader")
+            nav = window.findChild(QWidget, "appNav")
+            card = window.findChild(QWidget, "emptyStateCard")
+            assert header.height() >= 76
+            assert nav.height() >= 48
+            assert card.maximumWidth() == 800
+            assert card.width() <= 800
+            assert card.height() < window._workspace_stack.height()
+            assert abs(card.geometry().center().x() - card.parentWidget().rect().center().x()) <= 1
+            assert window._empty_import_button.isVisible()
+            assert window._empty_import_button.height() >= 34
+            assert window._empty_import_button.text() == "选择 DOCX 文件"
+            assert window._nav_tabs.tabRect(1).right() < window._nav_tabs.width()
+        window.close()
+
+    def test_document_information_can_wrap_without_displacing_actions(self, qapp) -> None:
+        from PySide6.QtWidgets import QWidget
+
+        window = MainWindow(check_items=(_item(),))
+        window.set_document(
+            Document(
+                document_id="doc-ui",
+                filename="设计开发要求及整车控制器电源管理说明" * 8 + ".docx",
+                content_fingerprint="fingerprint",
+                blocks=(_block("body:p0", "功能A"),),
+                coverage=Coverage.COMPLETE,
+            )
+        )
+        window.resize(1024, 600)
+        window.show()
+        qapp.processEvents()
+        bar = window.findChild(QWidget, "documentBar")
+        assert window.width() == 1024
+        assert window._doc_name_label.wordWrap()
+        for button in (window._import_button, window._run_button, window._cancel_button):
+            assert button.isVisible()
+            assert bar.rect().contains(button.mapTo(bar, button.rect().bottomRight()))
+        assert window._doc_name_label.height() >= window._doc_name_label.heightForWidth(
+            window._doc_name_label.width()
+        )
+        window.close()

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -400,10 +401,13 @@ class MainWindow(QMainWindow):
         """
         header = QWidget()
         header.setObjectName("appHeader")
-        header.setStyleSheet(f"background: {style.CARD}; border-bottom: 1px solid {style.BORDER};")
+        header.setMinimumHeight(76)
+        header.setStyleSheet(
+            f"#appHeader {{ background: {style.CARD}; border-bottom: 1px solid {style.BORDER}; }}"
+        )
         row = QHBoxLayout(header)
-        row.setContentsMargins(24, 12, 24, 12)
-        row.setSpacing(style.SPACING_CARD)
+        row.setContentsMargins(26, 12, 26, 12)
+        row.setSpacing(12)
         mark = QLabel("DR")
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mark.setStyleSheet(
@@ -415,10 +419,10 @@ class MainWindow(QMainWindow):
         title = QLabel("Design Requirement Checker")
         title_font = title.font()
         title_font.setBold(True)
-        title_font.setPointSizeF(13.5)
+        title_font.setPointSizeF(style.FONT_BRAND_PT)
         title.setFont(title_font)
         subtitle = QLabel("设计开发要求核查 · 驱动模块")
-        subtitle.setStyleSheet(f"color: {style.MUTED};")
+        subtitle.setStyleSheet(f"color: {style.MUTED}; font-size: {style.FONT_SECONDARY_PT}pt;")
         titles.addWidget(title)
         titles.addWidget(subtitle)
         row.addWidget(mark)
@@ -436,12 +440,18 @@ class MainWindow(QMainWindow):
         """Prototype nav: 文档核查 / 检查项管理 (N) + local-run note."""
         nav = QWidget()
         nav.setObjectName("appNav")
-        nav.setStyleSheet(f"background: {style.CARD}; border-bottom: 1px solid {style.BORDER};")
+        nav.setMinimumHeight(48)
+        nav.setStyleSheet(
+            f"#appNav {{ background: {style.CARD}; border-bottom: 1px solid {style.BORDER}; }}"
+        )
         row = QHBoxLayout(nav)
-        row.setContentsMargins(16, 0, 24, 0)
+        row.setContentsMargins(24, 0, 24, 0)
         row.setSpacing(0)
         self._nav_tabs = QTabBar()
         self._nav_tabs.setExpanding(False)
+        self._nav_tabs.setUsesScrollButtons(False)
+        self._nav_tabs.setMinimumHeight(48)
+        self._nav_tabs.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._nav_tabs.setDrawBase(False)
         self._nav_tabs.addTab("文档核查")
         self._nav_tabs.addTab(self._management_tab_text())
@@ -480,7 +490,7 @@ class MainWindow(QMainWindow):
         bar = QWidget()
         bar.setObjectName("documentBar")
         bar.setStyleSheet(
-            f"background: {style.CARD}; border: 1px solid {style.BORDER}; border-radius: 4px;"
+            f"#documentBar {{ background: {style.CARD}; border: 1px solid {style.BORDER}; }}"
         )
         bar_row = QHBoxLayout(bar)
         bar_row.setContentsMargins(16, 12, 16, 12)
@@ -494,14 +504,19 @@ class MainWindow(QMainWindow):
         name_font.setBold(True)
         self._doc_name_label.setFont(name_font)
         self._doc_name_label.setWordWrap(True)
+        self._doc_name_label.setMinimumWidth(0)
+        self._doc_name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._doc_state_label = QLabel("等待导入")
         self._doc_state_label.setWordWrap(True)
         self._doc_state_label.setStyleSheet(f"color: {style.MUTED};")
-        left.addWidget(caption)
+        info_row = QHBoxLayout()
+        info_row.setSpacing(12)
+        info_row.addWidget(caption)
+        info_row.addWidget(self._doc_state_label)
+        info_row.addStretch()
+        left.addLayout(info_row)
         left.addWidget(self._doc_name_label)
-        left.addWidget(self._doc_state_label)
-        bar_row.addLayout(left)
-        bar_row.addStretch()
+        bar_row.addLayout(left, 1)
 
         actions = QVBoxLayout()
         actions.setSpacing(style.SPACING)
@@ -544,13 +559,21 @@ class MainWindow(QMainWindow):
     def _build_empty_state(self) -> QWidget:
         """Prototype dropzone look — without drag/drop and without any mock
         使用示例文档 action (production parses the real file)."""
+        page = QWidget()
+        self._empty_page_layout = QVBoxLayout(page)
+        self._empty_page_layout.setContentsMargins(0, 32, 0, 32)
+        self._empty_page_layout.setSpacing(0)
         card = QWidget()
+        card.setMaximumWidth(800)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         card.setObjectName("emptyStateCard")
         card.setStyleSheet(
-            f"background: {style.CARD}; border: 2px dashed #adbdd0; border-radius: 5px;"
+            f"#emptyStateCard {{ background: {style.CARD}; "
+            "border: 2px dashed #adbdd0; border-radius: 5px; }"
         )
         outer = QVBoxLayout(card)
-        outer.setContentsMargins(54, 40, 54, 40)
+        self._empty_card_layout = outer
+        outer.setContentsMargins(24, 54, 24, 54)
         outer.setSpacing(10)
         outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         symbol = QLabel("W")
@@ -564,7 +587,7 @@ class MainWindow(QMainWindow):
         title = QLabel("导入《设计开发要求》")
         title_font = title.font()
         title_font.setBold(True)
-        title_font.setPointSizeF(15)
+        title_font.setPointSizeF(style.FONT_TITLE_PT)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setWordWrap(True)
@@ -581,10 +604,20 @@ class MainWindow(QMainWindow):
         self._empty_caption = QLabel()
         self._empty_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_caption.setWordWrap(True)
-        self._empty_caption.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+        self._empty_caption.setStyleSheet(
+            f"color: {style.MUTED}; font-size: {style.FONT_SECONDARY_PT}pt;"
+        )
         self._empty_caption.setText(self._empty_state_caption())
+        outer.addSpacing(6)
         outer.addWidget(self._empty_caption)
-        return card
+        card_row = QHBoxLayout()
+        card_row.setContentsMargins(0, 0, 0, 0)
+        card_row.addStretch()
+        card_row.addWidget(card, 1)
+        card_row.addStretch()
+        self._empty_page_layout.addLayout(card_row)
+        self._empty_page_layout.addStretch()
+        return page
 
     def _empty_state_caption(self) -> str:
         """Honest baseline summary — no mock claims, no result promises."""
