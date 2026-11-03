@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import indent
 
 from design_requirement_checker.baseline_store import save_baseline
 from design_requirement_checker.domain import CheckItem
@@ -32,25 +33,36 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 import design_requirement_checker.__main__ as entry
+import design_requirement_checker.baseline_store as store
 
 baseline_file = Path(os.environ["TEST_BASELINE_PATH"])
 entry.default_path = lambda: baseline_file
+store.default_path = lambda: baseline_file
 
 app = QApplication([])
 created = []
+failures = []
 
-def close_window():
-    for window in app.topLevelWidgets():
-        if window.isVisible():
-            created.append(window)
+def inspect_and_close():
+    windows = [w for w in app.topLevelWidgets() if w.isVisible()]
+    try:
+        assert len(windows) == 1, "Startup must show one main window"
+        window = windows[0]
+        created.append(window)
+{indent(assertions.strip(), "        ")}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        failures.append(repr(exc))
+    finally:
+        for window in windows:
             window.close()
-    app.quit()
+        app.quit()
 
-QTimer.singleShot(100, close_window)
+QTimer.singleShot(0, inspect_and_close)
 assert entry.main([]) == 0
+assert not failures, failures
 assert len(created) == 1, "Startup must show one main window"
-window = created[0]
-{assertions}
 print("STARTUP-OK")
 """
     return subprocess.run(
@@ -250,40 +262,47 @@ print("WORKFLOW-OK rc=", rc)
         assert "WORKFLOW-OK" in result.stdout
 
 
-def test_startup_shows_window_and_exits_when_closed() -> None:
+def test_startup_shows_window_and_exits_when_closed(tmp_path) -> None:
     # Catch a missing show(), broken composition, or event loop that never exits.
-    script = """
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QPushButton
-from design_requirement_checker.__main__ import main
+    # First launch explicitly means neither the temporary primary nor backup
+    # exists. Never read or delete a developer's actual AppData baseline.
+    assert not (tmp_path / "baseline.json").exists()
+    assert not (tmp_path / "baseline.json.bak").exists()
+    result = _run_startup_script(
+        tmp_path,
+        """
+assert window._baseline_load_state == "no-baseline"
+assert window._check_items == ()
+assert window._management_page._table.rowCount() == 0
+assert window._pages.currentIndex() == 0
+assert window._pages.currentWidget().isVisible()
+assert window._workspace_stack.currentIndex() == 0
+assert window._workspace_stack.currentWidget().isVisible()
+assert not window._management_page.isVisible()
 
-app = QApplication([])
-observed = []
-enabled_actions = []
-filter_labels = {"全部", "已配置", "未配置", "已划除", "待人工核查", "仅异常",
-                 "新增检查项", "编辑", "切换启用/禁用", "删除", "保存基准", "返回文档核查"}
-def inspect_and_close():
-    windows = [w for w in app.topLevelWidgets() if w.isVisible()]
-    observed.extend(windows)
-    for window in windows:
-        enabled_actions.extend(
-            button.text() for button in window.findChildren(QPushButton)
-            if button.isEnabled() and button.text() not in filter_labels
-        )
-        window.close()
-    app.quit()
+for button, label, enabled in (
+    (window._import_button, "选择 DOCX", True),
+    (window._empty_import_button, "选择 DOCX 文件", True),
+    (window._run_button, "开始核查", False),
+    (window._cancel_button, "取消核查", False),
+):
+    assert button.text() == label
+    assert button.isVisible(), label
+    assert button.isEnabled() is enabled, label
 
-QTimer.singleShot(100, inspect_and_close)
-assert main([]) == 0
-assert len(observed) == 1, "Startup must show one main window"
-assert sorted(enabled_actions) == ["选择 DOCX", "选择 DOCX 文件"], \\
-       "Only implemented operations may be enabled"
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
-        capture_output=True,
-        text=True,
-        timeout=15,
+assert window._nav_tabs.isVisible()
+assert window._nav_tabs.currentIndex() == 0
+assert window._nav_tabs.isTabEnabled(0)
+assert window._nav_tabs.isTabEnabled(1)
+window._nav_tabs.setCurrentIndex(1)
+assert window._pages.currentWidget() is window._management_page
+assert window._management_page.isVisible()
+assert not window._empty_import_button.isVisible()
+window._nav_tabs.setCurrentIndex(0)
+assert window._pages.currentIndex() == 0
+assert window._empty_import_button.isVisible()
+assert not window._management_page.isVisible()
+""",
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "STARTUP-OK" in result.stdout
