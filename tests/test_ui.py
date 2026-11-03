@@ -7,8 +7,10 @@ failure — with only implemented operations enabled.
 
 import threading
 import time
+import weakref
 
 import fixture_factory as fixtures
+import pytest
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QPushButton
 
@@ -465,6 +467,54 @@ class TestBackgroundImport:
         window._on_thread_finished(t1)
         assert window._active_threads == []
         window.close()
+
+    @pytest.mark.parametrize("operation", ["import", "verification"])
+    def test_worker_owned_until_thread_retirement(
+        self, qapp, tmp_path, monkeypatch, operation
+    ) -> None:
+        """Result delivery must not drop the worker before its thread retires.
+
+        Hold the thread after its event loop exits but before QThread.finished
+        can schedule worker deletion. This exposes the ownership gap without
+        relying on a Windows native crash or a timed sleep.
+        """
+        from PySide6.QtCore import QThread
+
+        import design_requirement_checker.ui.main_window as window_mod
+
+        retiring = threading.Event()
+        release = threading.Event()
+
+        class RetiringThread(QThread):
+            def run(self):
+                super().run()
+                retiring.set()
+                release.wait()
+
+        monkeypatch.setattr(window_mod, "QThread", RetiringThread)
+        path = fixtures.build_normal(tmp_path / "normal.docx")
+        window = MainWindow(check_items=(_item(),))
+        try:
+            if operation == "import":
+                window._start_import(str(path))
+                final_state = UiState.READY
+            else:
+                window.set_document(import_document(path))
+                window._on_run_clicked()
+                final_state = UiState.COMPLETED
+            thread = window._thread
+            worker = weakref.ref(window._worker)
+            assert _process_until(qapp, lambda: retiring.is_set() and window.state is final_state)
+            assert thread.isRunning()
+            assert thread in window._active_threads
+            assert window._worker is None  # current operation has completed
+            assert worker() is not None, "worker must stay owned until its QThread retires"
+        finally:
+            release.set()
+            assert _process_until(qapp, lambda: not window._active_threads, timeout_ms=5000)
+            window.close()
+        assert not window._worker_for_thread
+        assert worker() is None
 
     def test_on_thread_finished_joins_thread_before_releasing_ownership(self, qapp) -> None:
         """``QThread.finished`` is emitted *before* the OS thread terminates,
