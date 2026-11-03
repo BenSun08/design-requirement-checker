@@ -907,3 +907,74 @@ class TestBaselineChangeInvalidatesStaleVerification:
         assert applied is False
         assert window.results == ()
         window.close()
+
+
+class TestPrototypeManagementLayout:
+    def test_actions_and_wrapped_descriptions_fit_management_table(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QPushButton
+
+        from design_requirement_checker.ui.checklist_page import ChecklistPage
+        from design_requirement_checker.ui.style import apply_app_style
+
+        apply_app_style(qapp)
+        description = "开关门延时功能需支持工程师维护的完整要求；" * 12
+        page = ChecklistPage(
+            (
+                CheckItem(
+                    item_id="long",
+                    code="DC-001",
+                    name="门控制",
+                    detection_phrase="门控制",
+                    expected_description=description,
+                    enabled=False,
+                ),
+            )
+        )
+        page.resize(976, 600)
+        page.show()
+        qapp.processEvents()
+        table = page._table
+        actions = table.cellWidget(0, 6)
+        assert table.columnWidth(6) >= actions.minimumSizeHint().width()
+        assert table.rowHeight(0) >= actions.minimumSizeHint().height()
+        assert table.item(0, 4).text() == description
+        assert table.wordWrap()
+        assert table.textElideMode() is Qt.TextElideMode.ElideNone
+        assert table.rowHeight(0) > 60  # multiple readable lines, not a clipped single row
+        for button in actions.findChildren(QPushButton):
+            assert button.width() >= button.minimumSizeHint().width()
+        page.close()
+
+    def test_editor_scrolls_form_and_keeps_actions_reachable_at_minimum(self, qapp) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDialogButtonBox, QPlainTextEdit, QScrollArea
+
+        from design_requirement_checker.ui.item_editor_dialog import ItemEditorDialog
+        from design_requirement_checker.ui.style import apply_app_style
+
+        apply_app_style(qapp)
+        dlg = ItemEditorDialog()
+        assert (dlg.width(), dlg.height()) == (760, 640)
+        dlg.resize(560, 520)
+        dlg.show()
+        qapp.processEvents()
+        scroll = dlg.findChild(QScrollArea)
+        assert scroll is not None and scroll.widgetResizable()
+        assert isinstance(dlg._expected_edit, QPlainTextEdit)
+        assert dlg._expected_edit.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
+        assert dlg._expected_edit.minimumHeight() >= 96
+        buttons = dlg.findChild(QDialogButtonBox)
+        assert dlg.rect().contains(buttons.geometry())
+        scroll.ensureWidgetVisible(dlg._notes_edit)
+        qapp.processEvents()
+        assert (
+            scroll.viewport()
+            .rect()
+            .intersects(
+                dlg._notes_edit.rect().translated(
+                    dlg._notes_edit.mapTo(scroll.viewport(), dlg._notes_edit.rect().topLeft())
+                )
+            )
+        )
+        dlg.close()
