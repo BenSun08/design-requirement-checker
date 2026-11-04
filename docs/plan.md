@@ -36,6 +36,31 @@ reference; it is not production code and not the production UI.
 Direct development dependencies are pinned in `pyproject.toml`. Pins are not
 a cross-platform transitive lock or an offline dependency bundle.
 
+### Offline repository study tooling
+
+The manual `build-repository-study-pack.yml` workflow builds a static study
+pack on Ubuntu with Python 3.13. `scripts/build_study_pack.py` orchestrates
+Pydeps module analysis, focused Pyan3 callable-use graphs, Mermaid SVG
+rendering, reviewed Markdown explanations and local HTML source listings.
+Graphviz runs through the build-only Viz.js WebAssembly renderer; Node and
+all analysis dependencies remain outside the artifact and production app.
+Python tooling pins and the Node lockfile live in `scripts/study_pack/`.
+
+The build validates required pages, local links/anchors, static resources,
+source-symbol references and ZIP integrity. An extracted-file browser check
+uses `file://` with networking and page JavaScript disabled at desktop and
+phone widths. One artifact preserves `repository-study-pack/` as its root
+folder. This is study material, not application deployment or historical
+accuracy evidence. Static use graphs approximate relationships and do not
+resolve Qt signal delivery; the authored runtime flows explain those edges.
+
+For a local tooling build, install `scripts/study_pack/requirements.txt` in a
+separate Python 3.13 environment and run `npm ci --ignore-scripts --prefix
+scripts/study_pack`. Set `PUPPETEER_EXECUTABLE_PATH` to a local Chrome binary,
+then run `python scripts/build_study_pack.py`. Output must be absent or empty;
+the builder never deletes an existing directory. Generated output is ignored
+by Git. These dependencies are only for the build machine, never the reader.
+
 ## 3. Architecture
 
 One local desktop process with the boundaries defined in
@@ -189,6 +214,19 @@ These repetitions precede the final teardown-test refinements; final branch
 CI is reported separately in the PR. The temporary diagnostic workflow was
 removed after collecting evidence. Windows rendered GUI and formal deployment
 validation remain **NOT RUN**.
+
+**Repository study pack (2026-11-04; branch review pending).**
+Local Python 3.13 build and ZIP CRC checks **PASS**; relative-link/anchor and
+external-resource checks **PASS**. Extracted files passed headless Chrome
+checks at 1440 px and 390 px with networking and page JavaScript disabled,
+including image loading, relative navigation and native answer disclosures.
+Desktop landing/architecture rendering was visually inspected. Focused tooling
+tests **22 PASS**, full pytest **631 PASS**; Ruff, format, mypy, pip check and
+diff checks **PASS**. Independent review found no blocking issue; the
+persistence guide incorporates its damaged-primary confirmation suggestion.
+Branch macOS/Windows CI, the new Ubuntu workflow/artifact upload, real phone
+transfer and company Windows-browser validation remain **NOT RUN**. These
+results describe static study material, not application deployment validation.
 
 ## 7. Deferred release validation
 

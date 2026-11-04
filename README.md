@@ -109,6 +109,21 @@ Actions workflow and download its artifact. Transfer it with the matching
 repository source and an official Python 3.13 x64 installer to the offline PC,
 then follow `README-OFFLINE-INSTALL.txt` in the bundle.
 
+## Offline repository study pack
+
+In GitHub, open **Actions → Build Repository Study Pack → Run workflow**.
+When it finishes, download the single
+`DesignRequirementChecker-repository-study-pack` artifact ZIP. Transfer that
+ZIP from your phone through WeCom / 企业微信, extract the whole ZIP on the
+company PC, and open `repository-study-pack/index.html`.
+
+The generated pack is fully static and intended for offline company PCs:
+no Internet, Python, Node.js, LLM/API key, browser extension or local server
+is needed after extraction. It includes source-grounded guides, rendered
+SVG diagrams, exercises and offline source references for the selected commit.
+The workflow becomes available in Actions after it is merged to the default
+branch; no required workflow inputs are needed.
+
 ## Windows build
 
 Windows artifacts are built **on Windows** via the manually triggered
