@@ -1,0 +1,4 @@
+# Build tools only; deliberately separate from application dependencies.
+pydeps==3.0.9
+pyan3==2.9.0
+Markdown==3.10.2
