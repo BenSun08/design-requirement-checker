@@ -1,0 +1,541 @@
+{
+  "name": "design-requirement-checker",
+  "description": "A local desktop application checks engineering DOCX requirements against an engineer-maintained checklist and presents deterministic results with source evidence for human review.",
+  "languages": [
+    "css",
+    "html",
+    "javascript",
+    "json",
+    "markdown",
+    "python",
+    "spec",
+    "toml",
+    "typed",
+    "unknown",
+    "yaml"
+  ],
+  "frameworks": [
+    "PySide6",
+    "pytest",
+    "GitHub Actions"
+  ],
+  "files": [
+    {
+      "path": ".github/workflows/build-offline-dev-bundle.yml",
+      "language": "yaml",
+      "sizeLines": 100,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".github/workflows/build-windows.yml",
+      "language": "yaml",
+      "sizeLines": 53,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 47,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".impeccable/design.json",
+      "language": "json",
+      "sizeLines": 30,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".ua/config.json",
+      "language": "json",
+      "sizeLines": 1,
+      "fileCategory": "config"
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "sizeLines": 321,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 155,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/constitution.md",
+      "language": "markdown",
+      "sizeLines": 308,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plan.md",
+      "language": "markdown",
+      "sizeLines": 250,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/spec.md",
+      "language": "markdown",
+      "sizeLines": 329,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/tasks.md",
+      "language": "markdown",
+      "sizeLines": 161,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "packaging/windows/design-requirement-checker.spec",
+      "language": "spec",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "prototype/app.js",
+      "language": "javascript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "prototype/index.html",
+      "language": "html",
+      "sizeLines": 13,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "prototype/mock-data.js",
+      "language": "javascript",
+      "sizeLines": 14,
+      "fileCategory": "code"
+    },
+    {
+      "path": "prototype/styles.css",
+      "language": "css",
+      "sizeLines": 1,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "pyproject.toml",
+      "language": "toml",
+      "sizeLines": 41,
+      "fileCategory": "config"
+    },
+    {
+      "path": "scripts/run_historical_validation.py",
+      "language": "python",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/__init__.py",
+      "language": "python",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/__main__.py",
+      "language": "python",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/application.py",
+      "language": "python",
+      "sizeLines": 366,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/baseline_store.py",
+      "language": "python",
+      "sizeLines": 405,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/docx_adapter.py",
+      "language": "python",
+      "sizeLines": 552,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/domain.py",
+      "language": "python",
+      "sizeLines": 336,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/matching.py",
+      "language": "python",
+      "sizeLines": 505,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/py.typed",
+      "language": "typed",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/__init__.py",
+      "language": "python",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/checklist_page.py",
+      "language": "python",
+      "sizeLines": 355,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/item_editor_dialog.py",
+      "language": "python",
+      "sizeLines": 252,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/main_window.py",
+      "language": "python",
+      "sizeLines": 1831,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/style.py",
+      "language": "python",
+      "sizeLines": 273,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/design_requirement_checker/ui/workers.py",
+      "language": "python",
+      "sizeLines": 92,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/conftest.py",
+      "language": "python",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/docx_probe.py",
+      "language": "python",
+      "sizeLines": 416,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/fixture_factory.py",
+      "language": "python",
+      "sizeLines": 432,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/fixtures/README.md",
+      "language": "markdown",
+      "sizeLines": 8,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tests/persistence_probe.py",
+      "language": "python",
+      "sizeLines": 516,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/s6_probe.py",
+      "language": "python",
+      "sizeLines": 563,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_application.py",
+      "language": "python",
+      "sizeLines": 560,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_baseline_store.py",
+      "language": "python",
+      "sizeLines": 788,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_checklist_ui.py",
+      "language": "python",
+      "sizeLines": 1031,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_docx_adapter.py",
+      "language": "python",
+      "sizeLines": 506,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_domain.py",
+      "language": "python",
+      "sizeLines": 467,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_matching.py",
+      "language": "python",
+      "sizeLines": 680,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_spike_persistence.py",
+      "language": "python",
+      "sizeLines": 749,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_spike_s1_oxml_fidelity.py",
+      "language": "python",
+      "sizeLines": 195,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_spike_s2_locations_coverage.py",
+      "language": "python",
+      "sizeLines": 196,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_spike_s6_rules.py",
+      "language": "python",
+      "sizeLines": 546,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_spike_s6_scale.py",
+      "language": "python",
+      "sizeLines": 93,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_startup.py",
+      "language": "python",
+      "sizeLines": 340,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_ui.py",
+      "language": "python",
+      "sizeLines": 2541,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_validation_harness.py",
+      "language": "python",
+      "sizeLines": 306,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_validation_manifest.py",
+      "language": "python",
+      "sizeLines": 379,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_validation_metrics.py",
+      "language": "python",
+      "sizeLines": 292,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/README.md",
+      "language": "markdown",
+      "sizeLines": 170,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "validation/__init__.py",
+      "language": "python",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/harness.py",
+      "language": "python",
+      "sizeLines": 316,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/labels/example.json",
+      "language": "json",
+      "sizeLines": 34,
+      "fileCategory": "config"
+    },
+    {
+      "path": "validation/manifest.example.json",
+      "language": "json",
+      "sizeLines": 13,
+      "fileCategory": "config"
+    },
+    {
+      "path": "validation/metrics.py",
+      "language": "python",
+      "sizeLines": 235,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/release-readiness-proposal.md",
+      "language": "markdown",
+      "sizeLines": 80,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "validation/report.py",
+      "language": "python",
+      "sizeLines": 146,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/reports/.gitkeep",
+      "language": "unknown",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": "validation/schema.py",
+      "language": "python",
+      "sizeLines": 329,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 64,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "moderate",
+  "importMap": {
+    ".github/workflows/build-offline-dev-bundle.yml": [],
+    ".github/workflows/build-windows.yml": [],
+    ".github/workflows/ci.yml": [],
+    ".impeccable/design.json": [],
+    ".ua/config.json": [],
+    "AGENTS.md": [],
+    "README.md": [],
+    "docs/constitution.md": [],
+    "docs/plan.md": [],
+    "docs/spec.md": [],
+    "docs/tasks.md": [],
+    "packaging/windows/design-requirement-checker.spec": [],
+    "prototype/app.js": [],
+    "prototype/index.html": [],
+    "prototype/mock-data.js": [],
+    "prototype/styles.css": [],
+    "pyproject.toml": [],
+    "scripts/run_historical_validation.py": [
+      "validation/harness.py"
+    ],
+    "src/design_requirement_checker/__init__.py": [],
+    "src/design_requirement_checker/__main__.py": [
+      "src/design_requirement_checker/application.py",
+      "src/design_requirement_checker/baseline_store.py",
+      "src/design_requirement_checker/ui/__init__.py",
+      "src/design_requirement_checker/ui/main_window.py",
+      "src/design_requirement_checker/ui/style.py"
+    ],
+    "src/design_requirement_checker/application.py": [
+      "src/design_requirement_checker/docx_adapter.py",
+      "src/design_requirement_checker/domain.py",
+      "src/design_requirement_checker/matching.py"
+    ],
+    "src/design_requirement_checker/baseline_store.py": [
+      "src/design_requirement_checker/domain.py"
+    ],
+    "src/design_requirement_checker/docx_adapter.py": [
+      "src/design_requirement_checker/domain.py"
+    ],
+    "src/design_requirement_checker/domain.py": [],
+    "src/design_requirement_checker/matching.py": [
+      "src/design_requirement_checker/domain.py"
+    ],
+    "src/design_requirement_checker/py.typed": [],
+    "src/design_requirement_checker/ui/__init__.py": [],
+    "src/design_requirement_checker/ui/checklist_page.py": [
+      "src/design_requirement_checker/domain.py",
+      "src/design_requirement_checker/ui/__init__.py",
+      "src/design_requirement_checker/ui/style.py"
+    ],
+    "src/design_requirement_checker/ui/item_editor_dialog.py": [
+      "src/design_requirement_checker/domain.py",
+      "src/design_requirement_checker/ui/__init__.py",
+      "src/design_requirement_checker/ui/style.py"
+    ],
+    "src/design_requirement_checker/ui/main_window.py": [
+      "src/design_requirement_checker/application.py",
+      "src/design_requirement_checker/domain.py",
+      "src/design_requirement_checker/ui/__init__.py",
+      "src/design_requirement_checker/ui/checklist_page.py",
+      "src/design_requirement_checker/ui/style.py",
+      "src/design_requirement_checker/ui/workers.py"
+    ],
+    "src/design_requirement_checker/ui/style.py": [],
+    "src/design_requirement_checker/ui/workers.py": [
+      "src/design_requirement_checker/domain.py"
+    ],
+    "tests/conftest.py": [],
+    "tests/docx_probe.py": [],
+    "tests/fixture_factory.py": [],
+    "tests/fixtures/README.md": [],
+    "tests/persistence_probe.py": [],
+    "tests/s6_probe.py": [],
+    "tests/test_application.py": [
+      "tests/fixture_factory.py"
+    ],
+    "tests/test_baseline_store.py": [],
+    "tests/test_checklist_ui.py": [],
+    "tests/test_docx_adapter.py": [
+      "tests/fixture_factory.py"
+    ],
+    "tests/test_domain.py": [],
+    "tests/test_matching.py": [],
+    "tests/test_spike_persistence.py": [
+      "tests/persistence_probe.py"
+    ],
+    "tests/test_spike_s1_oxml_fidelity.py": [
+      "tests/docx_probe.py",
+      "tests/fixture_factory.py"
+    ],
+    "tests/test_spike_s2_locations_coverage.py": [
+      "tests/docx_probe.py",
+      "tests/fixture_factory.py"
+    ],
+    "tests/test_spike_s6_rules.py": [
+      "tests/fixture_factory.py",
+      "tests/s6_probe.py"
+    ],
+    "tests/test_spike_s6_scale.py": [
+      "tests/s6_probe.py"
+    ],
+    "tests/test_startup.py": [],
+    "tests/test_ui.py": [
+      "tests/fixture_factory.py"
+    ],
+    "tests/test_validation_harness.py": [
+      "validation/harness.py"
+    ],
+    "tests/test_validation_manifest.py": [
+      "validation/schema.py"
+    ],
+    "tests/test_validation_metrics.py": [
+      "validation/metrics.py"
+    ],
+    "validation/README.md": [],
+    "validation/__init__.py": [],
+    "validation/harness.py": [
+      "validation/schema.py"
+    ],
+    "validation/labels/example.json": [],
+    "validation/manifest.example.json": [],
+    "validation/metrics.py": [],
+    "validation/release-readiness-proposal.md": [],
+    "validation/report.py": [
+      "validation/metrics.py"
+    ],
+    "validation/reports/.gitkeep": [],
+    "validation/schema.py": []
+  }
+}

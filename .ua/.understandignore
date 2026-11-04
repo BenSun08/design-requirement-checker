@@ -1,0 +1,152 @@
+# .understandignore — patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
+# Lines below are suggestions — uncomment to activate.
+# Use ! prefix to force-include something excluded by defaults.
+#
+# Built-in defaults (always excluded unless negated):
+#   node_modules/, .git/, dist/, build/, obj/, *.lock, *.min.js, etc.
+#
+
+# --- From .gitignore (uncomment to exclude) ---
+
+# *.py[cod]
+# *$py.class
+# *.so
+# *.pyd
+# *.dll
+# env/
+# ENV/
+# .python-version
+# .pytest_cache/
+# .mypy_cache/
+# .dmypy.json
+# dmypy.json
+# .ruff_cache/
+# .pyright/
+# .coverage
+# .coverage.*
+# htmlcov/
+# coverage.xml
+# .hypothesis/
+# .tox/
+# .nox/
+# *.egg-info/
+# .eggs/
+# wheels/
+# __pyinstaller__/
+# installer-output/
+# release/
+# *.db
+# *.db-shm
+# *.db-wal
+# *.sqlite
+# *.sqlite3
+# runtime/
+# runtime-data/
+# tmp/
+# temp/
+# logs/
+# .env
+# .env.*
+# !.env.example
+# config.local.*
+# settings.local.*
+# *.secret
+# *.secrets
+# ui_*.py
+# *_rc.py
+# .qmlcache/
+# qmlcache/
+# .vscode/*
+# !.vscode/launch.json
+# !.vscode/extensions.json
+# !.vscode/settings.example.json
+# *.iml
+# .cursor/
+# *.swp
+# *.swo
+# *~
+# \#*\#
+# .\#*
+# .ipynb_checkpoints/
+# .DS_Store
+# .AppleDouble
+# .LSOverride
+# Thumbs.db
+# Thumbs.db:encryptable
+# ehthumbs.db
+# Desktop.ini
+# $RECYCLE.BIN/
+# *.lnk
+# test-output/
+# test-results/
+# screenshots/
+# samples/private/
+# samples/local/
+# imports/
+# exports/
+# validation/corpus-local/
+# validation/manifest.json
+# validation/reports/latest-results.json
+# *.bak
+# *.backup
+# *.tmp
+# *.temp
+# *.orig
+
+# --- Detected directories (uncomment to exclude) ---
+
+# docs/
+# scripts/
+# tests/
+
+# --- Test file patterns (uncomment to exclude) ---
+
+# JS / TS
+# *.test.*
+# *.spec.*
+# *.snap
+# C# / .NET
+# **/*Tests.cs
+# **/*Test.cs
+# **/*Fixture.cs
+# **/*.Tests.csproj
+# Java / Kotlin
+# **/src/test/**
+# **/*Test.java
+# **/*IT.java
+# **/*Spec.kt
+# Go
+# **/*_test.go
+# C++
+# **/*_test.cc
+# **/*_test.cpp
+# **/*_test.cxx
+# **/*Test.cc
+# **/*Test.cpp
+# **/*_unittest.cc
+# **/*_unittest.cpp
+# **/*_browsertest.cc
+# **/*_benchmark.cc
+# **/*Benchmark.cpp
+# Python
+# **/test_*.py
+# **/*_test.py
+# **/tests.py
+# **/conftest.py
+# Rust
+# **/tests.rs
+# **/test_*.rs
+# **/*_test.rs
+# **/bench_*.rs
+# **/*_bench.rs
+# Ruby
+# **/*_spec.rb
+# **/*_test.rb
+# **/test_*.rb
+# **/spec_helper.rb
+# **/test_helper.rb
+# **/rails_helper.rb
+# Swift
+# **/Tests/**/*.swift
+# **/Specs/**/*.swift
