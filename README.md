@@ -107,7 +107,10 @@ End users should use the packaged Windows `.exe`. For development on an offline
 Windows PC, manually run the `Build Windows offline development bundle` GitHub
 Actions workflow and download its artifact. Transfer it with the matching
 repository source and an official Python 3.13 x64 installer to the offline PC,
-then follow `README-OFFLINE-INSTALL.txt` in the bundle.
+then follow `README-OFFLINE-INSTALL.txt` in the bundle. It supports development,
+tests, quality checks, running from source, and local Windows PyInstaller
+packaging. Copy the entire resulting `DesignRequirementChecker/` directory
+when transferring the packaged application.
 
 ## Offline repository study pack
 
