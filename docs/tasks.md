@@ -53,6 +53,17 @@ Windows repetition evidence are recorded in [plan.md §6](plan.md); final
 branch CI is reported in the PR. This maintenance slice does not start Task 6
 or Task 7.
 
+## Offline repository study pack (implemented on branch; review pending)
+
+Owner-authorized developer tooling: manual Actions build, focused static
+graphs, source-grounded guides, offline source references, learning exercises,
+local-resource validation and one transfer ZIP. Production code and runtime
+dependencies are unchanged. Implementation decisions and local build usage
+are recorded in [plan.md](plan.md); reader instructions are in README.
+Remote workflow execution/artifact upload and company Windows-browser smoke
+validation remain NOT RUN until separately observed. This does not start
+Task 6 measurement, Task 7 application deployment or V0.2 product features.
+
 ## Deferred validation (DEFERRED by owner for the v0.1 internal-demo milestone)
 
 These remain prerequisites before any production/pilot readiness claim. Do

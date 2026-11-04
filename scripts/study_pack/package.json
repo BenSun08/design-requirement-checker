@@ -1,0 +1,9 @@
+{
+  "name": "drc-study-pack-build-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "12.2.0",
+    "@viz-js/viz": "3.27.0"
+  }
+}

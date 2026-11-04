@@ -250,3 +250,8 @@ validation/reports/latest-results.json
 !.ua/intermediate/
 .ua/intermediate/*
 !.ua/intermediate/scan-result.json
+
+# Offline repository study pack (build outputs and build-only Node tools)
+repository-study-pack/
+*.study-pack.zip
+scripts/study_pack/node_modules/

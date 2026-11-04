@@ -1,0 +1,83 @@
+name: Build Repository Study Pack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  study-pack:
+    name: Build static offline study pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Ubuntu runners provide Chrome; no browser download or runtime is shipped.
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: scripts/study_pack/requirements.txt
+
+      - name: Set up build-only Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: scripts/study_pack/package-lock.json
+
+      - name: Install isolated study-pack tools
+        run: |
+          python -m pip install -r scripts/study_pack/requirements.txt
+          npm ci --ignore-scripts --prefix scripts/study_pack
+          echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+
+      - name: Generate graphs, pages and validated ZIP
+        run: |
+          python scripts/build_study_pack.py --output "$RUNNER_TEMP/study-pack-artifact/repository-study-pack"
+          # The upload service creates the downloadable ZIP. Keep our CRC-checked
+          # local ZIP outside the upload root to avoid a ZIP inside another ZIP.
+          mv "$RUNNER_TEMP/study-pack-artifact/DesignRequirementChecker-repository.study-pack.zip" "$RUNNER_TEMP/verified.study-pack.zip"
+
+      - name: Validate the extracted ZIP with an offline browser
+        run: |
+          python -m zipfile -e "$RUNNER_TEMP/verified.study-pack.zip" "$RUNNER_TEMP/study-pack-extracted"
+          python scripts/build_study_pack.py --validate-only --output "$RUNNER_TEMP/study-pack-extracted/repository-study-pack"
+          node scripts/study_pack/check_browser.mjs "$RUNNER_TEMP/study-pack-extracted/repository-study-pack" scripts/study_pack
+
+      - name: Upload the one phone-transfer artifact
+        id: upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: DesignRequirementChecker-repository-study-pack
+          # Preserve repository-study-pack/ as the single top-level folder.
+          path: ${{ runner.temp }}/study-pack-artifact/
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 30
+
+      - name: Show download and usage instructions
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          PACK_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo '## Repository Study Pack generated successfully'
+            echo ''
+            echo "Artifact: [DesignRequirementChecker-repository-study-pack]($ARTIFACT_URL)"
+            echo ''
+            echo "Git SHA: $PACK_SHA"
+            echo ''
+            echo 'Usage: Download artifact → extract → open repository-study-pack/index.html'
+            echo ''
+            echo 'Phone → download one ZIP → WeCom / 企业微信 → company PC → extract the whole ZIP.'
+            echo ''
+            echo 'Fully static: no Internet, Python, Node, LLM, API key, extension or server needed after extraction.'
+          } >> "$GITHUB_STEP_SUMMARY"
