@@ -234,3 +234,19 @@ validation/reports/latest-results.json
 *.tmp
 *.temp
 *.orig
+
+
+# ============================================================
+# Understand Anything analysis
+# ============================================================
+
+# Keep the graph and incremental-update baseline; exclude analysis scratch.
+.ua/*
+!.ua/.understandignore
+!.ua/config.json
+!.ua/knowledge-graph.json
+!.ua/fingerprints.json
+!.ua/meta.json
+!.ua/intermediate/
+.ua/intermediate/*
+!.ua/intermediate/scan-result.json
