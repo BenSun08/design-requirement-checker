@@ -114,7 +114,9 @@ not start them without explicit owner authorization.
 - [x] Compare independently complete active descriptions in partially
   struck evidence and show a review reminder (merged in PR #21).
 - [x] Recognize exact inline replacements and retain complete live table
-  descriptions alongside fully struck rows (implemented on branch).
+  descriptions alongside fully struck rows (merged in PR #23).
+- [x] Compare all paragraphs of each linked GN description cell and display
+  the complete multiline description with its source locations.
 
 ## V0.2 backlog (CANDIDATE — unscheduled, not committed)
 

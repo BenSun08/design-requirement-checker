@@ -65,7 +65,7 @@ def build_gn_requirements(
     rows: tuple[tuple[str, bool], ...],
     *,
     description_header: str = "功能描述",
-    extra_paragraph: str = "",
+    extra_paragraphs: tuple[tuple[str, bool | None], ...] = (),
 ) -> Path:
     """GN headings, editable description rows, and an exact hit in the next section."""
     doc = Document()
@@ -79,8 +79,12 @@ def build_gn_requirements(
         serial.text = str(number)
         name.paragraphs[0].add_run("票机延时").font.strike = struck
         content.paragraphs[0].add_run(description).font.strike = struck
-    if extra_paragraph:
-        table.cell(1, 2).add_paragraph(extra_paragraph)
+    for description, struck in extra_paragraphs:
+        run = table.cell(1, 2).add_paragraph().add_run(description)
+        if struck is None:
+            run._r.get_or_add_rPr().append(_raw(f'<w:strike {NSDECL} w:val="unknown"/>'))
+        else:
+            run.font.strike = struck
 
     doc.add_paragraph("GN37：车外灯检查功能")
     next_table = doc.add_table(rows=2, cols=2)

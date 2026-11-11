@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "active-description-v5"
+RULE_REVISION = "gn-description-cell-v6"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
@@ -279,6 +279,9 @@ class MatchEvidence:
     comparison; ``ambiguous`` marks spans claimed by different configured term
     texts across items. ``active_description_spans`` records the source
     fragments used for a comparison after safe removal of struck clauses.
+    For a whole description cell, the span fields identify the first
+    paragraph and subsequent paragraphs retain their own locations and runs.
+    The comparison text and strike coverage describe the entire cell.
     """
 
     evidence_id: str
@@ -297,6 +300,7 @@ class MatchEvidence:
     ambiguous: bool = False
     comparison_blocker: str = ""
     active_description_spans: tuple[tuple[int, int], ...] = ()
+    additional_cell_paragraphs: tuple[DocumentBlock, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.evidence_id:
@@ -320,12 +324,34 @@ class MatchEvidence:
             if not (previous_end <= active_start < active_end <= req_end):
                 raise ValueError("active description spans must be ordered within the requirement")
             previous_end = active_end
+        if self.additional_cell_paragraphs:
+            if (
+                self.match_type is not MatchType.TABLE_DESCRIPTION
+                or self.location.cell is None
+                or self.location.ancestor_path
+                or self.location.cell.column_span != 1
+                or self.requirement_span != (0, len(self.raw_text))
+                or self.active_description_spans
+            ):
+                raise ValueError("additional paragraphs require whole description cell evidence")
+            paragraph_index = self.location.paragraph_index
+            for block in self.additional_cell_paragraphs:
+                location = block.location
+                if (
+                    location.document_id != self.document_id
+                    or location.cell != self.location.cell
+                    or location.ancestor_path
+                    or location.paragraph_index != paragraph_index + 1
+                ):
+                    raise ValueError("description paragraphs must be consecutive in the same cell")
+                paragraph_index = location.paragraph_index
 
     @property
     def description_source_text(self) -> str:
-        """Original characters used for description comparison."""
+        """Source text used for comparison, with line breaks between cell paragraphs."""
         spans = self.active_description_spans or (self.requirement_span,)
-        return "".join(self.raw_text[start:end] for start, end in spans)
+        first = "".join(self.raw_text[start:end] for start, end in spans)
+        return "\n".join((first, *(block.text for block in self.additional_cell_paragraphs)))
 
     @property
     def can_compare_description(self) -> bool:

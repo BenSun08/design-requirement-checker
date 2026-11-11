@@ -255,3 +255,6 @@ validation/reports/latest-results.json
 repository-study-pack/
 *.study-pack.zip
 scripts/study_pack/node_modules/
+
+# attachments
+.codex-attachments/

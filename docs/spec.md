@@ -104,7 +104,9 @@ Semantics of the core concepts (exact fields are visible in
   matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS/FUNCTION_NAME/
   EXPECTED_DESCRIPTION/TABLE_DESCRIPTION),
   transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), and raw
-  source spans for any accepted surviving description.
+  source spans for any accepted surviving description. Whole-cell evidence
+  uses the first paragraph for its primary location and retains the
+  additional source blocks.
 - **MatchType** — FUZZY, MANUAL and SEMANTIC are reserved names for
   separately approved future features, not implemented behavior.
 
@@ -132,7 +134,7 @@ percentages exist anywhere; a text match is not a calibrated probability.
 ## 6. Matching semantics
 
 Deterministic detection only. Conservative normalization allowlist (N1
-whitespace runs, N2 within-block line breaks, N3 selected full-width
+whitespace runs, N2 line breaks in comparison text, N3 selected full-width
 punctuation), raw↔normalized offset traceability, numbers/units/negation/
 operators/case preserved distinctly. Identity hits come from the detection
 phrase, aliases, or function name. A nonblank expected description can also
@@ -146,26 +148,35 @@ different check items claiming the same span are ambiguous.
 A matched body heading starting with `GN<number>:` scopes a function section
 up to the next such heading or the document end. A unique top-level table
 with a unique `功能描述` header in its first row identifies the description
-column. The associated cells supply full-paragraph text and strike evidence
-for that section. Its identity hits remain available as location evidence.
+column. Each associated cell supplies one description. Join the paragraphs
+from its first to its last nonblank paragraph with line breaks in document
+order and compare the resulting text to the baseline under N1–N3.
+Existing spaces or line breaks in the baseline can match the paragraph
+separators. Preserve the source paragraphs and runs for inspection.
+Identity hits remain available as location evidence.
 Another item claiming the heading, an uncertain column or continuation,
-excluded content in the linked table, or multiple nonblank paragraphs in a
-description cell requires manual review.
-The review pane opens on a linked description when available and labels the
-independent hit types. Source spans stay separate and all hits remain in
-source order. Full rules are in [constitution.md §7](constitution.md).
+or excluded content in the linked table requires manual review.
+The review pane opens on a linked description when available, preserves
+line breaks in the expected and actual descriptions, and shows the
+coordinates and strike formatting of the original paragraphs.
+Full rules are in [constitution.md §7](constitution.md).
 
-A partially struck description can provide active evidence when the strike
-covers separable whole clauses or only whitespace, the identity match is
-unambiguous and active, and the surviving text matches the full normalized
-baseline with at most changes to standalone numeric quantities of the same
-units. Separators between surviving clauses remain in the source. Quantity
-structure establishes completeness. Description comparison and conflict
-detection use the actual surviving values, including aligned parameter
-positions. Unknown formatting, incomplete edits, and unresolved conflicts
-still require manual review. The review workspace shows the surviving
-description, a partial-strike reminder for configured results, and the
-unmodified source with its strike formatting.
+For a multi-paragraph description cell, derive strike coverage from the
+nonblank source paragraphs. Unknown formatting in any of them takes
+precedence. A fully struck cell can qualify as struck-out evidence.
+Partial strike in a multi-paragraph cell requires manual review.
+
+A partially struck description within one paragraph can provide active
+evidence when the strike covers separable whole clauses or only whitespace,
+the identity match is unambiguous and active, and the surviving text matches
+the full normalized baseline with at most changes to standalone numeric
+quantities of the same units. Separators between surviving clauses remain
+in the source. Quantity structure establishes completeness. Description
+comparison and conflict detection use the actual surviving values, including
+aligned parameter positions. Unknown formatting, incomplete edits, and
+unresolved conflicts still require manual review. The review workspace shows
+the surviving description, a partial-strike reminder for configured results,
+and the unmodified source with its strike formatting.
 
 An inline replacement can also provide active evidence when the struck
 fragment starts at a clause boundary and the following unstruck text repeats
@@ -192,7 +203,8 @@ revisions, text boxes, content controls, field codes, footnote/endnote
 references, smart tags, `altChunk`, nested/invalid hyperlink structures,
 header/footer content. Malformed, protected or unreadable files fail
 explicitly with categorized errors — never a fabricated all-missing report.
-No automatic joining across paragraphs or cells.
+Ingestion keeps paragraphs as separate blocks. Only GN description
+comparison combines paragraphs within a reliably identified cell.
 
 ## 8. Review workspace UX
 
@@ -303,7 +315,8 @@ user baseline directory survives replacement.
 - No drag-and-drop import; file-dialog selection only.
 - No report export.
 - No fuzzy, semantic or LLM matching (by design in v0.1).
-- No automatic joining of requirement text across paragraphs or table cells.
+- Whole-cell description comparison is limited to reliably associated GN
+  function tables. Requirement spans remain within their source paragraphs.
 - Unsupported Word structures yield LIMITED coverage rather than results.
 - No automatic engineering approval — the tool surfaces evidence and
   uncertainty; a human decides.

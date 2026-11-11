@@ -169,7 +169,7 @@ def test_harness_records_discrepancy(corpus: Path) -> None:
 
 def test_harness_reproducibility_metadata(corpus: Path) -> None:
     metadata = run_validation(corpus)["metadata"]
-    assert metadata["ruleRevision"] == "active-description-v5"
+    assert metadata["ruleRevision"] == "gn-description-cell-v6"
     assert metadata["validationSchemaVersion"] == 1
     assert metadata["documentCount"] == 1
     assert metadata["labelledCaseCount"] == 3
