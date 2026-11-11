@@ -220,6 +220,10 @@ def _format_block_with_highlight(
     return rendered or "（空段落）"
 
 
+def _multiline_html(text: str) -> str:
+    return html.escape(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+
 def _description_diff_html(expected: str, actual: str) -> str:
     """Presentation-only character-level diff of expected vs actual description.
 
@@ -235,15 +239,15 @@ def _description_diff_html(expected: str, actual: str) -> str:
     pieces: list[str] = []
     for tag, a_start, a_end, b_start, b_end in matcher.get_opcodes():
         if tag == "equal":
-            pieces.append(html.escape(expected[a_start:a_end]))
+            pieces.append(_multiline_html(expected[a_start:a_end]))
             continue
         if tag in ("delete", "replace"):
             pieces.append(
                 f'<span style="color: {style.DIFF_DELETE}; text-decoration: line-through">'
-                f"{html.escape(expected[a_start:a_end])}</span>"
+                f"{_multiline_html(expected[a_start:a_end])}</span>"
             )
         if tag in ("insert", "replace"):
-            pieces.append(f"<mark>{html.escape(actual[b_start:b_end])}</mark>")
+            pieces.append(f"<mark>{_multiline_html(actual[b_start:b_end])}</mark>")
     return "".join(pieces)
 
 
@@ -1253,6 +1257,7 @@ class MainWindow(QMainWindow):
             evidence[self._evidence_index] if 0 <= self._evidence_index < len(evidence) else None
         )
         selected_raw = selected.description_source_text if selected is not None else ""
+        source_html = _multiline_html(selected_raw)
         actual_text = selected.requirement_text if selected is not None else ""
         if selected is not None and selected.match_type is MatchType.TABLE_DESCRIPTION:
             actual_text = selected_raw
@@ -1296,31 +1301,31 @@ class MainWindow(QMainWindow):
         # .comparison — expected vs actual side by side.
         expected_cell = (
             f'<p style="color: {style.MUTED}; font-size: 12px"><b>预期要求 · 检查基准</b></p>'
-            f"<p>期望描述：{html.escape(item.expected_description)}</p>"
+            f"<p>期望描述：{_multiline_html(item.expected_description)}</p>"
         )
         if selected is not None and selected.active_description_spans:
-            actual_body = f"<p>有效描述：{html.escape(selected_raw)}</p>"
+            actual_body = f"<p>有效描述：{source_html}</p>"
         elif show_difference:
-            actual_body = f"<p>实际描述：{html.escape(selected_raw)}</p>"
+            actual_body = f"<p>实际描述：{source_html}</p>"
         elif selected is not None and selected.comparison_blocker == "function-table-locator":
-            actual_body = f"<p>定位原文：{html.escape(selected_raw)}</p>"
+            actual_body = f"<p>定位原文：{source_html}</p>"
         elif selected is not None and selected.match_type is MatchType.EXPECTED_DESCRIPTION:
-            actual_body = f"<p>候选原文：{html.escape(selected_raw)}</p>"
+            actual_body = f"<p>候选原文：{source_html}</p>"
         elif (
             result.status is CheckStatus.CONFIGURED
             and selected is not None
             and selected.strike_coverage is StrikeCoverage.FULL
         ):
-            actual_body = f"<p>已划除条款：<s>{html.escape(selected_raw)}</s></p>"
+            actual_body = f"<p>已划除条款：<s>{source_html}</s></p>"
         elif result.status is CheckStatus.MISSING:
             actual_body = (
                 "<p>在已检查范围内未找到匹配证据。</p><p>请人工确认文档是否使用了其他表述。</p>"
             )
         elif actual_text:
             if result.status is CheckStatus.STRUCK_OUT:
-                actual_body = f"<p>实际需求：<s>{html.escape(actual_text)}</s></p>"
+                actual_body = f"<p>实际需求：<s>{_multiline_html(actual_text)}</s></p>"
             else:
-                actual_body = f"<p>实际需求：{html.escape(actual_text)}</p>"
+                actual_body = f"<p>实际需求：{_multiline_html(actual_text)}</p>"
         else:
             actual_body = "<p>无证据内容可显示。</p>"
         actual_cell = (
@@ -1387,8 +1392,8 @@ class MainWindow(QMainWindow):
     def _source_context_html(self, evidence: MatchEvidence) -> str:
         """Rebuild the prototype .context block from the current document.
 
-        Three bordered rows — 上一段 (muted), 当前 (tinted, requirement span
-        highlighted) and 下一段 (muted) — under a 原文上下文 heading that
+        Show the preceding and following blocks around the highlighted
+        source paragraph(s), under a 原文上下文 heading that
         repeats the caveat: this is a reconstructed excerpt, not a Word page
         rendering.
         """
@@ -1424,8 +1429,17 @@ class MainWindow(QMainWindow):
             f'<p style="white-space: pre-wrap">'
             f"{_format_block_with_highlight(current, span)}</p></td>"
         )
-        if idx < len(blocks) - 1:
-            nxt = blocks[idx + 1]
+        for paragraph in evidence.additional_cell_paragraphs:
+            rows.append(
+                f'<td bgcolor="{style.CONTEXT_CURRENT}">'
+                f'<p style="color: {style.MUTED}; font-size: 11px">匹配位置 · '
+                f"{html.escape(format_location(paragraph.location))}</p>"
+                f'<p style="white-space: pre-wrap">'
+                f"{_format_block_with_highlight(paragraph, (0, len(paragraph.text)))}</p></td>"
+            )
+        next_index = idx + len(evidence.additional_cell_paragraphs) + 1
+        if next_index < len(blocks):
+            nxt = blocks[next_index]
             rows.append(
                 f"<td><p"
                 f' style="color: {style.MUTED}; font-size: 11px">下一段 · '

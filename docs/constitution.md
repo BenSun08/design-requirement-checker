@@ -156,7 +156,7 @@ The approved normalization allowlist is conservative and fixed:
 
 ```text
 N1: ASCII space / tab / U+3000 runs → one ASCII space
-N2: line-break characters inside one block → one ASCII space
+N2: line-break characters in comparison text → one ASCII space
 N3: selected full-width punctuation → ASCII equivalent
 ```
 
@@ -172,8 +172,10 @@ Normalized matching must retain raw-source traceability with half-open
 
 Plain-text requirement spans associate forward from a matched identity term.
 GN table association links a heading to separate description evidence using
-document order and table coordinates. Each span stays in its original
-paragraph or table-cell paragraph. Unsafe associations remain explicit.
+document order and table coordinates. A reliably identified description cell
+can supply one comparison using its paragraphs joined with line breaks.
+Each source span stays in its original paragraph, with its own location
+and formatting. Unsafe associations remain explicit.
 An expected-description hit without identity evidence requires manual review.
 
 Strike coverage is `NONE | FULL | PARTIAL | UNKNOWN` evaluated over the

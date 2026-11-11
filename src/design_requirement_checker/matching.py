@@ -2,7 +2,8 @@
 
 Uses the normalization allowlist and forward-only paragraph spans from the
 Task 3 contract, plus independent field matching and GN description-table
-association. Each piece of evidence keeps a raw span in one document block.
+association. A linked description cell is compared as a whole with source
+paragraphs retained separately.
 Inputs and outputs are domain values only.
 """
 
@@ -72,11 +73,11 @@ class NormalizedText:
 
 
 def normalize(raw: str) -> NormalizedText:
-    """Apply the S6 allowlist to one block's raw text.
+    """Apply the S6 allowlist to text.
 
     N1/N2 collapse runs of spaces/tabs/ideographic spaces/line breaks to one
-    ASCII space (within one block only — blocks are never joined); N3 maps the
-    approved fullwidth ASCII punctuation. Everything else — digits, units,
+    ASCII space. N3 maps approved fullwidth ASCII punctuation.
+    Everything else — digits, units,
     letter case, negation, operators, ideographic punctuation — is preserved
     verbatim. The stored source text is never replaced.
     """
@@ -190,6 +191,7 @@ class _Occurrence:
     comparison_blocker: str
     ambiguous: bool
     active_table_heading: bool = False
+    additional_cell_paragraphs: tuple[DocumentBlock, ...] = ()
 
 
 def _find_all(haystack: str, needle: str) -> list[tuple[int, int]]:
@@ -307,6 +309,7 @@ def _active_description_spans(
     """Prove the surviving description against the baseline and retain raw offsets."""
     if (
         occurrence.strike_coverage is not StrikeCoverage.PARTIAL
+        or occurrence.additional_cell_paragraphs
         or occurrence.comparison_blocker
         or occurrence.ambiguous
         or not expected.strip(_STRIKE_WHITESPACE)
@@ -529,8 +532,10 @@ def _associate_candidates(
 # --- structured function sections --------------------------------------------
 
 
-def _description_blocks(document: Document, start: int, end: int) -> tuple[list[int], bool]:
-    """Locate one description column and keep each source paragraph separate."""
+def _description_cells(
+    document: Document, start: int, end: int
+) -> tuple[list[tuple[int, ...]], bool]:
+    """Locate the description cells and group their original paragraph indices."""
     blocks = document.blocks
     headers: set[TableCellCoordinates] = set()
     for block in blocks[start:end]:
@@ -569,14 +574,23 @@ def _description_blocks(document: Document, start: int, end: int) -> tuple[list[
         if block.text.strip():
             populated_rows.add(top_cell.row_index)
         if top_cell.column_index == column:
-            paragraphs = rows.setdefault(top_cell.row_index, [])
-            if block.text.strip():
-                paragraphs.append(index)
-                uncertain |= (
-                    bool(location.ancestor_path) or top_cell.column_span != 1 or len(paragraphs) > 1
-                )
+            rows.setdefault(top_cell.row_index, []).append(index)
 
-    descriptions = [index for paragraphs in rows.values() for index in paragraphs]
+    descriptions: list[tuple[int, ...]] = []
+    for paragraphs in rows.values():
+        nonblank = [i for i, index in enumerate(paragraphs) if blocks[index].text.strip()]
+        if not nonblank:
+            continue
+        source_indices = paragraphs[nonblank[0] : nonblank[-1] + 1]
+        if source_indices[-1] - source_indices[0] + 1 != len(source_indices) or any(
+            (location := blocks[index].location).ancestor_path
+            or (location.cell is not None and location.cell.column_span != 1)
+            for index in source_indices
+        ):
+            uncertain = True
+            descriptions.extend((paragraphs[i],) for i in nonblank)
+        else:
+            descriptions.append(tuple(source_indices))
     return descriptions, uncertain or not descriptions or bool(populated_rows - rows.keys())
 
 
@@ -598,7 +612,7 @@ def _associate_table_descriptions(
         if shared:
             uncertain = True
             continue
-        indices, uncertain_section = _description_blocks(document, start + 1, end)
+        cells, uncertain_section = _description_cells(document, start + 1, end)
         uncertain |= uncertain_section
         heading = document.blocks[start]
         heading_active = any(
@@ -608,11 +622,23 @@ def _associate_table_descriptions(
             and _strike_coverage(heading, occurrence.raw_match_span) is StrikeCoverage.NONE
             for occurrence in occurrences
         )
-        for index in indices:
+        for index, *following in cells:
             block = document.blocks[index]
-            normalized = normalize(block.text).text
+            additional = tuple(document.blocks[i] for i in following)
+            raw = "\n".join((block.text, *(paragraph.text for paragraph in additional)))
+            normalized = normalize(raw).text
             span = (0, len(block.text))
-            coverage = _strike_coverage(block, span)
+            coverages = {
+                _strike_coverage(paragraph, (0, len(paragraph.text)))
+                for paragraph in (block, *additional)
+                if paragraph.text.strip()
+            }
+            if StrikeCoverage.UNKNOWN in coverages:
+                coverage = StrikeCoverage.UNKNOWN
+            elif len(coverages) == 1:
+                (coverage,) = coverages
+            else:
+                coverage = StrikeCoverage.PARTIAL
             located.append(
                 _Occurrence(
                     block_index=index,
@@ -620,7 +646,7 @@ def _associate_table_descriptions(
                     term=block.text,
                     alias_id="",
                     match_type=MatchType.TABLE_DESCRIPTION,
-                    transformations=_active_rules(block.text),
+                    transformations=_active_rules(raw),
                     raw_match_span=span,
                     raw_requirement_span=span,
                     requirement_text=normalized,
@@ -631,6 +657,7 @@ def _associate_table_descriptions(
                     else "",
                     ambiguous=False,
                     active_table_heading=heading_active,
+                    additional_cell_paragraphs=additional,
                 )
             )
     return located, uncertain
@@ -721,6 +748,7 @@ def _classify(
             active_description_spans=_active_description_spans(
                 document.blocks[occurrence.block_index], occurrence, expected_norm
             ),
+            additional_cell_paragraphs=occurrence.additional_cell_paragraphs,
         )
         for index, occurrence in enumerate(occurrences)
     )

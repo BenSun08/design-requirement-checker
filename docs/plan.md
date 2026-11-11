@@ -91,7 +91,7 @@ transcripts are preserved in Git history (see the pre-consolidation
 | Application stack | Python + PySide6 / Qt Widgets, one local process | Owner decision (2026-09-10) after a five-option comparison; Electron/Tauri/.NET/sidecar variants rejected on maintained-language count, footprint and 8 h/week sustainability | Qt model/view learning curve; packaging needs desktop testing |
 | DOCX extraction | python-docx 1.2.0 + focused OOXML/lxml access | S1/S2 spike (2026-09-18, macOS, synthetic fixtures): high-level APIs omit hyperlink-contained runs and obscure style inheritance | Unsupported detected structures yield LIMITED coverage; encrypted DOCX validated only as a container-format failure path |
 | Strike resolution | Full inheritance chain, `w:default="1"` default style, tri-state unknown | S1/S2 + Task 2 remediation | Unresolved double-strike semantics stay unknown |
-| Matching | Deterministic rule engine, N1–N3 normalization allowlist, forward-only requirement spans, span-level strike coverage | S6 spike (2026-09-19): hand-labelled rule tests, scale 3,000 blocks × 100 items ≈ 1.1 s, ≈ 0.13 MB transient peak, per-(item, block) cancellation checkpoints, determinism | No cross-paragraph/cell joining; association uncertainty is explicit, not resolved |
+| Matching | Deterministic rule engine, N1–N3 normalization allowlist, forward-only requirement spans, span-level strike coverage | S6 spike (2026-09-19): hand-labelled rule tests, scale 3,000 blocks × 100 items ≈ 1.1 s, ≈ 0.13 MB transient peak, per-(item, block) cancellation checkpoints, determinism | Whole-cell comparison requires a reliably associated GN description cell |
 | Status model | 3 `CheckStatus` values + separate `Resolution` (UNRESOLVED ⇒ status unset) | Owner-confirmed product rule; enforced as a domain invariant | — |
 | Persistence | UTF-8 JSON, `schemaVersion = 1`, two-temp-file atomic save, `.bak` recovery, strict validation | Persistence spike (2026-09-20, corrected 2026-09-22; 56 spike tests): SQLite and single-temp alternatives rejected for failure-phase risk | Backup/replacement behavior untested against the real distribution format |
 | Packaging | PyInstaller onedir, built on a Windows runner via a manually triggered workflow | `build-windows.yml` builds and uploads the artifact | An artifact is not deployment evidence; owner smoke check only |
@@ -258,7 +258,11 @@ Python, pip, Qt or Office automation.
 Feature definitions live in [spec.md §14](spec.md); the actionable backlog in
 [tasks.md](tasks.md). Phasing only:
 
-Rule revision `active-description-v5` is implemented on a branch. It covers
+Rule revision `gn-description-cell-v6` compares each linked GN description
+cell as one unit while retaining the original blocks. The review pane uses
+those source blocks for paragraph locations and formatting.
+
+Rule revision `active-description-v5` merged in PR #23. It covers
 exact inline replacements and complete, consistent live descriptions
 alongside fully struck rows in one function table. Synthetic DOCX and Qt
 tests exercise both cases and the selection of live evidence.

@@ -360,19 +360,91 @@ class TestGNTableVerification:
         assert result.resolution is Resolution.UNRESOLVED
         assert result.review_reasons == ("active-and-struck-coexist",)
 
-    def test_multi_paragraph_description_requires_review(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        ("separator", "expected_signal", "comparison"),
+        [
+            ("\n", "D13", ComparisonState.SAME),
+            (" ", "D13", ComparisonState.SAME),
+            ("\n", "D14", ComparisonState.DIFFERENT),
+            ("", "D13", ComparisonState.DIFFERENT),
+        ],
+    )
+    def test_compares_all_paragraphs_in_one_description_cell(
+        self, tmp_path, separator, expected_signal, comparison
+    ) -> None:
+        clauses = (
+            "1. 采集伸出开关（D7）有效，发送按下信号；",
+            "2. 采集伸出开关（D7）无效，发送未按下信号；",
+            "3. 采集收回开关（D13）有效，发送按下信号；",
+            "4. 采集收回开关（D13）无效，发送未按下信号。",
+        )
         path = fixtures.build_gn_requirements(
-            tmp_path / "gn.docx", (("延时30min", False),), extra_paragraph="停止驱动D30"
+            tmp_path / "gn.docx",
+            ((clauses[0], False),),
+            extra_paragraphs=(
+                (clauses[1], False),
+                ("", False),
+                (clauses[2], False),
+                (clauses[3], False),
+            ),
+        )
+        expected = separator.join(clauses).replace("D13", expected_signal)
+        result = self._verify(path, expected)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is comparison
+        (cell,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert result.primary_evidence_id == cell.evidence_id
+        assert cell.description_source_text == "\n".join((*clauses[:2], "", *clauses[2:]))
+        assert cell.raw_text == clauses[0]
+        assert cell.requirement_span == (0, len(clauses[0]))
+        assert [block.block_id for block in cell.additional_cell_paragraphs] == [
+            "t0r1c2:table-cell:p1",
+            "t0r1c2:table-cell:p2",
+            "t0r1c2:table-cell:p3",
+            "t0r1c2:table-cell:p4",
+        ]
+
+    @pytest.mark.parametrize(
+        ("first_struck", "second_struck", "coverage", "status", "reasons"),
+        [
+            (True, True, StrikeCoverage.FULL, CheckStatus.STRUCK_OUT, ()),
+            (True, False, StrikeCoverage.PARTIAL, None, ("partial-strike",)),
+            (False, None, StrikeCoverage.UNKNOWN, None, ("unknown-strike-formatting",)),
+        ],
+    )
+    def test_multi_paragraph_cell_retains_strike_evidence(
+        self, tmp_path, first_struck, second_struck, coverage, status, reasons
+    ) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx",
+            (("延时30min；", first_struck),),
+            extra_paragraphs=(("停止驱动D30", second_struck),),
         )
         result = self._verify(path)
 
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.review_reasons == ("uncertain-function-table",)
-        table_evidence = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
-        assert [e.raw_text for e in table_evidence] == [
-            "延时30min",
-            "停止驱动D30",
-        ]
+        assert result.status is status
+        assert result.review_reasons == reasons
+        assert result.comparison_state is ComparisonState.NOT_COMPARED
+        (cell,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert cell.strike_coverage is coverage
+        assert cell.description_source_text == "延时30min；\n停止驱动D30"
+        (second,) = cell.additional_cell_paragraphs
+        assert second.runs[0].effective_strike is second_struck
+
+    def test_description_never_joins_cells_in_separate_rows(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("延时30min；", False), ("停止驱动D30", False))
+        )
+        result = self._verify(path, "延时30min；\n停止驱动D30")
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        assert [
+            evidence.description_source_text
+            for evidence in result.evidence
+            if evidence.match_type is MatchType.TABLE_DESCRIPTION
+        ] == ["延时30min；", "停止驱动D30"]
 
     def test_grid_before_does_not_move_the_description_to_the_remarks(self, tmp_path) -> None:
         result = self._verify(

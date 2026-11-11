@@ -1576,6 +1576,34 @@ class TestStatusSpecificPresentation:
 
 
 class TestMultiEvidence:
+    def test_multiline_description_shows_all_cell_paragraphs(self, qapp, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx",
+            (("延时15min；", False),),
+            extra_paragraphs=(("停止驱动D30", False), ("结束采集。", False)),
+        )
+        document = import_document(path)
+        assert isinstance(document, Document)
+        item = CheckItem(
+            item_id="gn36",
+            code="FD-GN36",
+            name="票机延时退电功能",
+            detection_phrase="票机延时",
+            expected_description="延时30min；\n停止驱动D30\n结束采集。",
+        )
+        (result,) = verify_document(document, (item,)).results
+        window = MainWindow(check_items=(item,))
+        window.set_document(document)
+        try:
+            window._show_detail(result)
+            detail = window._detail_view.toPlainText()
+            assert "期望描述：延时30min；\n停止驱动D30\n结束采集。" in detail
+            assert "实际描述：延时15min；\n停止驱动D30\n结束采集。" in detail
+            assert "描述有差异" in detail
+            assert "表1 · 行2 · 单元格3 · 段3" in detail
+        finally:
+            window.close()
+
     def test_active_table_row_is_selected_with_a_struck_row_reminder(self, qapp, tmp_path) -> None:
         expected = "收到启用信号后延时30min；关闭输出"
         old = "旧条款：延时60min"
