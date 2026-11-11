@@ -146,6 +146,13 @@ class ChecklistPage(QWidget):
         self._table.doubleClicked.connect(lambda _index: self._on_edit_selected())
         outer.addWidget(self._table, 1)
 
+        self._feedback_label = QLabel()
+        self._feedback_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._feedback_label.setWordWrap(True)
+        self._feedback_label.setStyleSheet(f"color: {style.PRIMARY_DARK};")
+        self._feedback_label.hide()
+        outer.addWidget(self._feedback_label)
+
         # Footer — production-only: the prototype has no persistence, so it
         # has no save action. 保存基准 runs the handler (validate → persist →
         # publish); 返回文档核查 never saves.
@@ -181,6 +188,8 @@ class ChecklistPage(QWidget):
         """
         self._items = list(items)
         self._refresh_table()
+        self._feedback_label.clear()
+        self._feedback_label.hide()
 
     def _on_save_requested(self) -> None:
         """Handle 保存基准 without discarding the candidate on failure.
@@ -194,7 +203,10 @@ class ChecklistPage(QWidget):
             self.saved.emit()
             return
         if self._save_handler(self.current_items()):
+            self._show_feedback("基准已保存到本地。")
             self.saved.emit()
+        else:
+            self._show_feedback("基准未保存。当前修改已保留。")
 
     def _on_close_requested(self) -> None:
         """返回/关闭 without saving — the handler is never touched."""
@@ -274,6 +286,14 @@ class ChecklistPage(QWidget):
         self._populate_table()
         self._count_label.setText(f"共 {len(self._items)} 项")
 
+    def _show_feedback(self, message: str) -> None:
+        self._feedback_label.setText(message)
+        self._feedback_label.show()
+
+    def _show_item_change(self, action: str, item: CheckItem) -> None:
+        self._refresh_table()
+        self._show_feedback(f"已{action}检查项 “{item.code}”。尚未保存到本地，请点击「保存基准」。")
+
     def current_items(self) -> tuple[CheckItem, ...]:
         """Return the current working snapshot (immutable tuple)."""
         return tuple(self._items)
@@ -301,7 +321,7 @@ class ChecklistPage(QWidget):
         if candidate is None:
             return
         self._items.append(candidate)
-        self._refresh_table()
+        self._show_item_change("新增", candidate)
 
     def _on_edit_selected(self) -> None:
         row = self._selected_row()
@@ -317,7 +337,7 @@ class ChecklistPage(QWidget):
         if candidate is None:
             return
         self._items[row] = candidate
-        self._refresh_table()
+        self._show_item_change("更新", candidate)
 
     def _on_toggle_enabled(self) -> None:
         row = self._selected_row()
@@ -335,7 +355,7 @@ class ChecklistPage(QWidget):
             enabled=not existing.enabled,
             notes=existing.notes,
         )
-        self._refresh_table()
+        self._show_item_change("禁用" if existing.enabled else "启用", existing)
 
     def _on_delete_selected(self) -> None:
         row = self._selected_row()
@@ -345,11 +365,12 @@ class ChecklistPage(QWidget):
         reply = QMessageBox.question(
             self,
             "确认删除",
-            f"确定删除检查项 “{existing.code} · {existing.name}” 吗？\n此操作不可撤销。",
+            f"确定删除检查项 “{existing.code} · {existing.name}” 吗？\n"
+            "点击「保存基准」后，删除才会写入本地文件。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if reply is not QMessageBox.StandardButton.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
         del self._items[row]
-        self._refresh_table()
+        self._show_item_change("删除", existing)

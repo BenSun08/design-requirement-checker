@@ -12,8 +12,10 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QPushButton
 
+from design_requirement_checker.application import load_baseline_from, save_baseline_to
 from design_requirement_checker.baseline_store import UnsupportedBaselineSchemaError
 from design_requirement_checker.domain import (
     BlockType,
@@ -35,6 +37,13 @@ def _item(item_id: str = "a", phrase: str = "功能A") -> CheckItem:
         name=f"name-{item_id}",
         detection_phrase=phrase,
         aliases=(),
+    )
+
+
+def _assert_feedback(page, *fragments: str) -> None:
+    assert any(
+        not label.isHidden() and all(fragment in label.text() for fragment in fragments)
+        for label in page.findChildren(QLabel)
     )
 
 
@@ -221,7 +230,7 @@ class TestStartupLoadStates:
         new_items = (_item("a"),)
         with patch(
             "PySide6.QtWidgets.QMessageBox.question",
-            return_value=QMessageBox.StandardButton.Yes,
+            return_value=QMessageBox.StandardButton.Yes.value,
         ) as mock_question:
             _dialog, mock_save, accepted = _save_via_page(window, new_items, tmp_path)
 
@@ -306,6 +315,19 @@ class TestCandidatePreservation:
         assert window._check_items == (_item("a"),)
         window.close()
 
+    def test_warning_confirmed_yes_proceeds(self, qapp, tmp_path) -> None:
+        window = MainWindow(check_items=(_item("a"),))
+        candidate = (_item("a"), _item("b"))
+        with patch(
+            "PySide6.QtWidgets.QMessageBox.warning",
+            return_value=QMessageBox.StandardButton.Yes.value,
+        ):
+            _page, _mock_save, accepted = _save_via_page(window, candidate, tmp_path)
+
+        assert accepted == [True]
+        assert window._check_items == candidate
+        window.close()
+
     def test_disk_failure_keeps_candidate_and_current_state(self, qapp, tmp_path) -> None:
         from design_requirement_checker.matching import verify
 
@@ -319,16 +341,29 @@ class TestCandidatePreservation:
         gen_before = window._op_generation
 
         candidate = (_item("a"), _item("b", phrase="功能B"))
-        with patch("PySide6.QtWidgets.QMessageBox.critical"):
-            _dialog, mock_save, accepted = _save_via_page(
-                window,
-                candidate,
-                tmp_path,
-                save_side_effect=OSError("disk full"),
-            )
+        window._on_manage_clicked()
+        page = window._management_page
+        page.load_items(candidate)
+        with (
+            patch("PySide6.QtWidgets.QMessageBox.critical") as critical,
+            patch("PySide6.QtWidgets.QMessageBox.information") as information,
+            patch(
+                "design_requirement_checker.baseline_store.default_path",
+                return_value=tmp_path / "baseline.json",
+            ),
+            patch(
+                "design_requirement_checker.application.save_baseline_to",
+                side_effect=OSError("disk full"),
+            ) as mock_save,
+        ):
+            save = page.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save)
+            save.click()
 
         mock_save.assert_called_once()
-        assert accepted == []  # candidate still open
+        assert "磁盘写入错误" in critical.call_args.args[2]
+        information.assert_not_called()
+        assert page.current_items() == candidate
+        _assert_feedback(page, "基准未保存", "已保留")
         assert window._check_items == existing  # current baseline unchanged
         assert len(window.results) == 1  # results unchanged
         assert window._op_generation == gen_before  # no invalidation
@@ -508,9 +543,11 @@ class TestChecklistWorkspace:
         dialog._on_toggle_enabled()
         assert dialog.current_items()[0].enabled is False
         assert dialog._table.item(0, 5).text() == "禁用"
+        _assert_feedback(dialog, "已禁用", "未保存")
         dialog._on_toggle_enabled()
         assert dialog.current_items()[0].enabled is True
         assert dialog._table.item(0, 5).text() == "启用"
+        _assert_feedback(dialog, "已启用", "未保存")
 
     def test_delete_cancel_keeps_item(self, qapp) -> None:
         from design_requirement_checker.ui.checklist_page import ChecklistPage
@@ -524,17 +561,61 @@ class TestChecklistWorkspace:
             dialog._on_delete_selected()
         assert len(dialog.current_items()) == 1
 
-    def test_delete_confirm_removes_item(self, qapp) -> None:
-        from design_requirement_checker.ui.checklist_page import ChecklistPage
+    def test_delete_confirm_refreshes_rows_and_persists_on_save(self, qapp, tmp_path) -> None:
+        baseline_path = tmp_path / "baseline.json"
+        first, deleted, last = _item("a", "门控制"), _item("b", "温度报警"), _item("c", "过流保护")
+        original = (first, deleted, last)
+        save_baseline_to(baseline_path, original, "test-baseline")
+        window = MainWindow(check_items=original, baseline_id="test-baseline")
+        window.show()
+        window._on_manage_clicked()
+        page = window._management_page
+        table = page._table
+        table.selectRow(0)  # the clicked row, even if another is selected, is the target
 
-        dialog = ChecklistPage((_item("a"),))
-        dialog._table.selectRow(0)
+        def confirm_delete() -> None:
+            box = qapp.activeModalWidget()
+            if isinstance(box, QMessageBox):
+                box.button(QMessageBox.StandardButton.Yes).click()
+
+        actions = table.cellWidget(1, 6)
+        delete = next(
+            button for button in actions.findChildren(QPushButton) if button.text() == "删除"
+        )
+        QTimer.singleShot(0, confirm_delete)
+        delete.click()
+
+        assert page.current_items() == (first, last)
+        assert [table.item(row, 0).text() for row in range(table.rowCount())] == ["A", "C"]
+        assert page._count_label.text() == "共 2 项"
+        _assert_feedback(page, "已删除", "B", "未保存")
+        assert load_baseline_from(baseline_path).items == original
+
+        saved_notices = []
+
+        def acknowledge_save() -> None:
+            box = qapp.activeModalWidget()
+            if isinstance(box, QMessageBox):
+                saved_notices.append((box.icon(), box.text(), load_baseline_from(baseline_path)))
+                box.accept()
+
         with patch(
-            "PySide6.QtWidgets.QMessageBox.question",
-            return_value=QMessageBox.StandardButton.Yes,
+            "design_requirement_checker.baseline_store.default_path", return_value=baseline_path
         ):
-            dialog._on_delete_selected()
-        assert dialog.current_items() == ()
+            save = page.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save)
+            QTimer.singleShot(0, acknowledge_save)
+            save.click()
+            qapp.processEvents()
+
+        assert len(saved_notices) == 1
+        icon, text, saved = saved_notices[0]
+        assert icon == QMessageBox.Icon.Information
+        assert "保存成功" in text and "2 项" in text and "本地" in text
+        assert saved.items == (first, last)
+        assert load_baseline_from(baseline_path).items == (first, last)
+        assert window._nav_tabs.tabText(1) == "检查项管理 (2)"
+        _assert_feedback(page, "基准已保存")
+        window.close()
 
     def test_add_item_appends_with_fresh_identity(self, qapp) -> None:
         from design_requirement_checker.ui.checklist_page import ChecklistPage
@@ -559,6 +640,7 @@ class TestChecklistWorkspace:
         mock_editor.assert_called_once_with(existing=None, parent=dialog)
         assert dialog.current_items() == (_item("a"), fresh)
         assert dialog._table.rowCount() == 2
+        _assert_feedback(dialog, "已新增", "B", "未保存")
 
     def test_edit_selected_replaces_row_keeping_identity(self, qapp) -> None:
         from design_requirement_checker.ui.checklist_page import ChecklistPage
@@ -584,6 +666,8 @@ class TestChecklistWorkspace:
         assert mock_editor.call_args.kwargs["existing"] == _item("a")
         assert dialog.current_items() == (edited,)
         assert dialog._table.rowCount() == 1  # replaced, not appended
+        assert dialog._table.item(0, 1).text() == "renamed"
+        _assert_feedback(dialog, "已更新", "A", "未保存")
 
     def test_edit_cancelled_keeps_row(self, qapp) -> None:
         from design_requirement_checker.ui.checklist_page import ChecklistPage
