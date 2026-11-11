@@ -226,7 +226,7 @@ class TestTablesAndLocations:
         assert "t0r0c1:table-cell:p0" not in ids
         h_merge = document.blocks[ids.index("t0r0c0:table-cell:p0")]
         assert h_merge.text == "H-MERGE"
-        assert h_merge.location.cell == TableCellCoordinates(0, 0, 0)
+        assert h_merge.location.cell == TableCellCoordinates(0, 0, 0, column_span=2)
         # The vMerge master is extracted at its own position; the continuation
         # row below it produces no block.
         assert "t0r1c2:table-cell:p0" in ids

@@ -144,8 +144,10 @@ access; do not replace it without explicit authorization and new evidence.
   nested/invalid hyperlinks, excluded header/footer content) must force
   `Coverage.LIMITED`, never disappear silently. Coverage is not a
   CheckStatus.
-- Tables: do not concatenate separate cell paragraphs; merged cells appear
-  once at the master location; nested tables preserve ancestor coordinates.
+- Tables preserve layout-grid offsets and column spans. Merged cells appear
+  once at the master location, and nested tables preserve ancestor coordinates.
+  Excluded table content is recorded against the containing top-level table.
+  Separate cell paragraphs remain separate blocks.
 - Never modify the source document.
 
 ## 7. Deterministic matching principles
@@ -168,10 +170,11 @@ punctuation stripping. Engineering meaning must stay distinct:
 Normalized matching must retain raw-source traceability with half-open
 `[start, end)` offsets; never replace stored raw text with normalized text.
 
-Requirement spans associate forward from the matched detection phrase only;
-never join across paragraph or table-cell boundaries. Unsafe association
-stays explicit (`requirement-span-association-uncertain`,
-`no-associated-requirement-content`).
+Plain-text requirement spans associate forward from a matched identity term.
+GN table association links a heading to separate description evidence using
+document order and table coordinates. Each span stays in its original
+paragraph or table-cell paragraph. Unsafe associations remain explicit.
+An expected-description hit without identity evidence requires manual review.
 
 Strike coverage is `NONE | FULL | PARTIAL | UNKNOWN` evaluated over the
 associated requirement span. Classification:
@@ -181,7 +184,8 @@ consistent active evidence            → RESOLVED / CONFIGURED
 all qualifying evidence fully struck  → RESOLVED / STRUCK_OUT
 no qualifying evidence                → RESOLVED / MISSING
 partial strike / unknown strike / active+struck coexistence /
-conflicting active key values / ambiguous function identity
+conflicting active key values / ambiguous function identity /
+description-only hit / uncertain function table
                                       → UNRESOLVED / status=None
 ```
 

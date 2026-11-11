@@ -79,9 +79,9 @@ Semantics of the core concepts (exact fields are visible in
 
 - **CheckItem** — stable `item_id`, unique `code`, canonical `name`, required
   engineer-maintained `detection_phrase`, `category`, optional
-  `expected_description`, `aliases[]`, `enabled`, `notes`. The name labels
-  the item; the detection phrase is what the matcher searches for. The
-  phrase is never auto-derived from the name.
+  `expected_description`, `aliases[]`, `enabled`, `notes`. The matcher
+  searches the detection phrase, aliases, name, and nonblank expected
+  description independently. The phrase is never auto-derived from the name.
 - **CheckItemAlias** — stable `alias_id`, `text`, `notes`; an explicit
   alternative detection phrase; an alias hit never asserts description
   equality.
@@ -101,7 +101,8 @@ Semantics of the core concepts (exact fields are visible in
   `ComparisonState` (SAME/DIFFERENT/NOT_COMPARED), review reasons, rule
   revision.
 - **MatchEvidence** — raw text, matched span(s), requirement span(s),
-  matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS),
+  matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS/FUNCTION_NAME/
+  EXPECTED_DESCRIPTION/TABLE_DESCRIPTION),
   transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), explanation.
 - **MatchType** — FUZZY, MANUAL and SEMANTIC are reserved names for
   separately approved future features, not implemented behavior.
@@ -132,11 +133,26 @@ percentages exist anywhere; a text match is not a calibrated probability.
 Deterministic detection only. Conservative normalization allowlist (N1
 whitespace runs, N2 within-block line breaks, N3 selected full-width
 punctuation), raw↔normalized offset traceability, numbers/units/negation/
-operators/case preserved distinctly. Forward-only requirement-span
-association within one paragraph/cell; uncertain association is explicit.
-Strike evaluated over the requirement span. All qualifying occurrences are
-retained in source order. Full rules:
-[constitution.md §7](constitution.md).
+operators/case preserved distinctly. Identity hits come from the detection
+phrase, aliases, or function name. A nonblank expected description can also
+produce independent substring hits. Description hits without identity
+evidence require manual review. Plain-text spans associate forward within one
+paragraph or cell paragraph. Overlapping identity hits remain visible, with
+the configured phrase or alias span used for description and parameter
+comparison when the identity is unambiguous. A name and a phrase from
+different check items claiming the same span are ambiguous.
+
+A matched body heading starting with `GN<number>:` scopes a function section
+up to the next such heading or the document end. A unique top-level table
+with a unique `功能描述` header in its first row identifies the description
+column. The associated cells supply full-paragraph text and strike evidence
+for that section. Its identity hits remain available as location evidence.
+Another item claiming the heading, an uncertain column or continuation,
+excluded content in the linked table, or multiple nonblank paragraphs in a
+description cell requires manual review.
+The review pane opens on a linked description when available and labels the
+independent hit types. Source spans stay separate and all hits remain in
+source order. Full rules are in [constitution.md §7](constitution.md).
 
 No fuzzy or semantic matching in v0.1.
 

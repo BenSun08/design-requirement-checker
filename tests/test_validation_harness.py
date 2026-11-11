@@ -169,7 +169,7 @@ def test_harness_records_discrepancy(corpus: Path) -> None:
 
 def test_harness_reproducibility_metadata(corpus: Path) -> None:
     metadata = run_validation(corpus)["metadata"]
-    assert metadata["ruleRevision"] == "task3-v1"
+    assert metadata["ruleRevision"] == "structured-match-v3"
     assert metadata["validationSchemaVersion"] == 1
     assert metadata["documentCount"] == 1
     assert metadata["labelledCaseCount"] == 3

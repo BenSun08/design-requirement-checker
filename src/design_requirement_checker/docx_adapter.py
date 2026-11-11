@@ -377,13 +377,18 @@ def _collect_table(
     for tbl_child in table._tbl:
         if tbl_child.tag == qn("w:sdt"):
             warnings.append("content-control-content-excluded")
+            row_index += len(tbl_child.findall(f"{qn('w:sdtContent')}/{qn('w:tr')}"))
             continue
         if tbl_child.tag != qn("w:tr"):
             continue
-        column_cursor = 0
+        column_cursor = tbl_child.grid_before
         for row_child in tbl_child:
             if row_child.tag == qn("w:sdt"):
                 warnings.append("content-control-content-excluded")
+                column_cursor += sum(
+                    cell.grid_span
+                    for cell in row_child.findall(f"{qn('w:sdtContent')}/{qn('w:tc')}")
+                )
                 continue
             if row_child.tag != qn("w:tc"):
                 continue
@@ -406,7 +411,10 @@ def _collect_table(
                 column_cursor += grid_span
                 continue
             cell = TableCellCoordinates(
-                table_index=table_index, row_index=row_index, column_index=column_cursor
+                table_index=table_index,
+                row_index=row_index,
+                column_index=column_cursor,
+                column_span=grid_span,
             )
             cell_parent = _Cell(tc, table)
             paragraph_index = 0
@@ -448,7 +456,7 @@ def _collect_body(
     resolver: _StyleResolver,
     blocks: list[DocumentBlock],
     warnings: list[str],
-) -> None:
+) -> frozenset[int]:
     body = doc.element.body
     if body.findall(f".//{qn('w:altChunk')}"):
         # w:altChunk imports external content at render time; it is never
@@ -456,6 +464,7 @@ def _collect_body(
         warnings.append("alt-chunk-content-excluded")
     paragraph_index = 0
     table_index = 0
+    limited_tables: set[int] = set()
     for child in body:
         if child.tag == qn("w:p"):
             _collect_paragraph(
@@ -471,12 +480,16 @@ def _collect_body(
             )
             paragraph_index += 1
         elif child.tag == qn("w:tbl"):
+            warning_count = len(warnings)
             _collect_table(
                 Table(child, doc._body), (), table_index, resolver, document_id, blocks, warnings
             )
+            if len(warnings) > warning_count or child.find(f".//{qn('w:altChunk')}") is not None:
+                limited_tables.add(table_index)
             table_index += 1
         elif child.tag == qn("w:sdt"):
             warnings.append("content-control-content-excluded")
+    return frozenset(limited_tables)
 
 
 def _collect_header_footer_warnings(doc: Any, warnings: list[str]) -> None:
@@ -532,7 +545,7 @@ def read_document(path: Path) -> Document:
         warnings: list[str] = []
         blocks: list[DocumentBlock] = []
         resolver = _StyleResolver(package)
-        _collect_body(package, document_id, resolver, blocks, warnings)
+        limited_tables = _collect_body(package, document_id, resolver, blocks, warnings)
         _collect_header_footer_warnings(package, warnings)
     except Exception as exc:
         # Boundary guard: an implementation bug in collection must not crash
@@ -549,4 +562,5 @@ def read_document(path: Path) -> Document:
         blocks=tuple(blocks),
         coverage=coverage,
         warnings=tuple(unique_warnings),
+        limited_table_indices=limited_tables,
     )

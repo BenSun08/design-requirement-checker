@@ -23,16 +23,127 @@ from design_requirement_checker.application import (
 from design_requirement_checker.domain import (
     BlockType,
     CheckItem,
+    CheckResult,
     CheckStatus,
     ComparisonState,
     Coverage,
     Document,
     DocumentBlock,
     DocumentLocation,
+    MatchType,
     Resolution,
+    StrikeCoverage,
     TextRun,
 )
 from design_requirement_checker.matching import RULE_REVISION
+
+
+class TestGNTableVerification:
+    @staticmethod
+    def _verify(path) -> CheckResult:  # type: ignore[no-untyped-def]
+        document = import_document(path)
+        assert isinstance(document, Document)
+        item = CheckItem(
+            item_id="gn36",
+            code="FD-GN36",
+            name="票机延时退电功能",
+            detection_phrase="票机延时",
+            expected_description="采集ON信号，延时30min；停止驱动（D30）",
+        )
+        (result,) = verify_document(document, (item,)).results
+        return result
+
+    @pytest.mark.parametrize(
+        ("delay", "comparison"),
+        [("30min", ComparisonState.SAME), ("15min", ComparisonState.DIFFERENT)],
+    )
+    def test_compares_full_description_in_own_section(self, tmp_path, delay, comparison) -> None:
+        actual = f"采集ON信号，延时{delay}；停止驱动（D30）"
+        path = fixtures.build_gn_requirements(tmp_path / "gn.docx", ((actual, False),))
+        result = self._verify(path)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is comparison
+        (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert evidence.block_id == "t0r1c2:table-cell:p0"
+        assert evidence.raw_text == actual
+        assert evidence.requirement_span == (0, len(actual))
+        assert evidence.evidence_id == result.primary_evidence_id
+        assert any(
+            e.block_id == "t1r1c1:table-cell:p0" and e.match_type is MatchType.EXPECTED_DESCRIPTION
+            for e in result.evidence
+        )
+
+    def test_missing_header_stops_at_next_gn_heading(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("延时15min", False),), description_header="说明"
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.status is None
+        assert result.review_reasons == ("uncertain-function-table",)
+        assert all(e.match_type is not MatchType.TABLE_DESCRIPTION for e in result.evidence)
+
+    def test_struck_description_determines_status_with_active_heading(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(tmp_path / "gn.docx", (("延时30min", True),))
+        result = self._verify(path)
+
+        assert result.status is CheckStatus.STRUCK_OUT
+        (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert evidence.strike_coverage is StrikeCoverage.FULL
+        assert any(e.match_type is MatchType.FUNCTION_NAME for e in result.evidence)
+
+    def test_conflicting_table_rows_are_both_retained(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("延时30min", True), ("延时15min", False))
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("active-and-struck-coexist",)
+        table_evidence = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert [e.strike_coverage for e in table_evidence] == [
+            StrikeCoverage.FULL,
+            StrikeCoverage.NONE,
+        ]
+
+    def test_multi_paragraph_description_requires_review(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("延时30min", False),), extra_paragraph="停止驱动D30"
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("uncertain-function-table",)
+        table_evidence = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert [e.raw_text for e in table_evidence] == [
+            "延时30min",
+            "停止驱动D30",
+        ]
+
+    def test_grid_before_does_not_move_the_description_to_the_remarks(self, tmp_path) -> None:
+        result = self._verify(
+            fixtures.build_gn_grid_table(tmp_path / "gn.docx", "leading-omission")
+        )
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        (description,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert description.block_id == "t0r1c1:table-cell:p0"
+        assert description.raw_text == "采集ON信号，延时30min；停止驱动（D30）"
+
+    @pytest.mark.parametrize("layout", ["excluded-cell", "merged-header"])
+    def test_ambiguous_description_grid_requires_review(self, tmp_path, layout) -> None:
+        result = self._verify(fixtures.build_gn_grid_table(tmp_path / "gn.docx", layout))
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("uncertain-function-table",)
+        assert all(e.match_type is not MatchType.TABLE_DESCRIPTION for e in result.evidence)
+        (candidate,) = [
+            e for e in result.evidence if e.match_type is MatchType.EXPECTED_DESCRIPTION
+        ]
+        assert candidate.block_id == "t0r1c1:table-cell:p0"
 
 
 def _sha256(path) -> str:  # type: ignore[no-untyped-def]
