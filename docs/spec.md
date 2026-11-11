@@ -79,9 +79,9 @@ Semantics of the core concepts (exact fields are visible in
 
 - **CheckItem** — stable `item_id`, unique `code`, canonical `name`, required
   engineer-maintained `detection_phrase`, `category`, optional
-  `expected_description`, `aliases[]`, `enabled`, `notes`. The name labels
-  the item; the detection phrase is what the matcher searches for. The
-  phrase is never auto-derived from the name.
+  `expected_description`, `aliases[]`, `enabled`, `notes`. The matcher
+  searches the detection phrase, aliases, name, and nonblank expected
+  description independently. The phrase is never auto-derived from the name.
 - **CheckItemAlias** — stable `alias_id`, `text`, `notes`; an explicit
   alternative detection phrase; an alias hit never asserts description
   equality.
@@ -101,7 +101,8 @@ Semantics of the core concepts (exact fields are visible in
   `ComparisonState` (SAME/DIFFERENT/NOT_COMPARED), review reasons, rule
   revision.
 - **MatchEvidence** — raw text, matched span(s), requirement span(s),
-  matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS),
+  matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS/FUNCTION_NAME/
+  EXPECTED_DESCRIPTION),
   transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), explanation.
 - **MatchType** — FUZZY, MANUAL and SEMANTIC are reserved names for
   separately approved future features, not implemented behavior.
@@ -132,7 +133,8 @@ percentages exist anywhere; a text match is not a calibrated probability.
 Deterministic detection only. Conservative normalization allowlist (N1
 whitespace runs, N2 within-block line breaks, N3 selected full-width
 punctuation), raw↔normalized offset traceability, numbers/units/negation/
-operators/case preserved distinctly. Forward-only requirement-span
+operators/case preserved distinctly. A description-only hit requires manual
+review. Forward-only requirement-span
 association within one paragraph/cell; uncertain association is explicit.
 Strike evaluated over the requirement span. All qualifying occurrences are
 retained in source order. Full rules:
@@ -299,6 +301,22 @@ Not scheduled, not committed; each needs a product decision first.
 - **Baseline version / history support** — Status: V0.2 candidate. Goal:
   inspect what changed between baseline revisions. Constraint: run
   provenance must remain explainable.
+
+### Approved follow-up
+
+- **Function name and description matching** — Search configured detection
+  phrases and aliases, the function name, and a nonblank expected description
+  independently using the existing normalization allowlist and substring
+  search. Preserve the source of each hit. A description hit without a
+  phrase, alias, or name hit requires manual review.
+- **GN function table association** — A matching body heading of the form
+  `GN<number>: <name>` can locate its description table before the next GN
+  heading. Use a unique top-level table whose first row contains a unique
+  `功能描述` header. Evaluate each nonblank description cell after the header
+  using its original strike formatting and compare its full normalized
+  paragraph with the expected description. Keep the heading and other
+  identity hits as location evidence. Missing or ambiguous associations and
+  cells with multiple nonblank paragraphs require manual review.
 
 ### Later / exploratory — NOT COMMITTED
 

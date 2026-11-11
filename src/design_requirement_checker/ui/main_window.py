@@ -81,6 +81,8 @@ _MATCH_TYPE_LABELS = {
     MatchType.EXACT: "精确匹配",
     MatchType.NORMALIZED: "规范化匹配",
     MatchType.ALIAS: "别名匹配",
+    MatchType.FUNCTION_NAME: "功能名称匹配",
+    MatchType.EXPECTED_DESCRIPTION: "预期要求匹配",
 }
 
 # UI-only mapping of stable UNRESOLVED reason tokens to Chinese text.
@@ -90,6 +92,7 @@ _REASON_LABELS: dict[str, str] = {
     "active-and-struck-coexist": "生效与划线共存",
     "conflicting-key-parameters": "关键参数冲突",
     "ambiguous-function-identity": "功能身份歧义",
+    "expected-description-only": "仅命中预期要求，需确认功能归属",
 }
 
 # UI-only mapping for comparison_reason tokens. Domain tokens are left

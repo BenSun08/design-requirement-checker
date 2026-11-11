@@ -112,6 +112,46 @@ def verify_one(item: CheckItem, *blocks: DocumentBlock) -> CheckResult:
     return results[0]
 
 
+class TestIndependentFieldMatches:
+    def test_function_name_establishes_identity_without_phrase(self) -> None:
+        item = make_item("fd-gn36", "备用检测短语", name="票机延时退电功能")
+        result = verify_one(item, make_block(0, [("票机延时退电功能", False)]))
+
+        assert result.status is CheckStatus.CONFIGURED
+        (evidence,) = result.evidence
+        assert evidence.match_type.value == "function-name"
+        assert evidence.matched_span == (0, 8)
+
+    @pytest.mark.parametrize("strike", [False, True])
+    def test_description_only_is_a_manual_review_candidate(self, strike: bool) -> None:
+        item = make_item("fd-gn36", "票机延时", "停止驱动（D30）", name="票机延时退电功能")
+        result = verify_one(item, make_block(0, [("停止驱动(D30)", strike)]))
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.status is None
+        assert result.comparison_state is ComparisonState.NOT_COMPARED
+        assert result.review_reasons == ("expected-description-only",)
+        (evidence,) = result.evidence
+        assert evidence.match_type.value == "expected-description"
+        assert evidence.raw_text == "停止驱动(D30)"
+        assert evidence.matched_span == (0, 9)
+        assert evidence.transformations == ("N3",)
+
+    def test_three_fields_can_report_the_same_raw_span_independently(self) -> None:
+        name = "票机延时退电功能"
+        item = make_item("fd-gn36", name, name, name=name)
+        result = verify_one(item, make_block(0, [(name, False)]))
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        assert {evidence.match_type.value for evidence in result.evidence} == {
+            "exact",
+            "function-name",
+            "expected-description",
+        }
+        assert {evidence.matched_span for evidence in result.evidence} == {(0, 8)}
+
+
 class TestNormalizationAllowlist:
     def test_whitespace_runs_collapse_to_single_space(self) -> None:
         assert normalize("A  B").text == "A B"
@@ -215,9 +255,9 @@ class TestExactDetection:
         b1 = make_block(1, [("2门控制增加开关延时3s功能", False)])  # 开关, not 开关门
         assert verify_one(item, b0, b1).status is CheckStatus.MISSING
 
-    def test_display_name_is_not_a_detector(self) -> None:
+    def test_partial_function_name_without_detection_phrase_does_not_match(self) -> None:
         item = make_item("dr-006", PHRASE, EXPECTED, name="2门控制延时")
-        result = verify_one(item, make_block(0, [("支持2门控制延时。", False)]))
+        result = verify_one(item, make_block(0, [("支持2门控制。", False)]))
         assert result.status is CheckStatus.MISSING
 
 
@@ -226,8 +266,9 @@ class TestNormalizedMatching:
         item = make_item("a", "A B功能", "A B功能2s")
         result = verify_one(item, make_block(0, [("A  B功能2s", False)]))
         assert result.status is CheckStatus.CONFIGURED
-        (evidence,) = result.evidence
+        evidence, description = result.evidence
         assert evidence.match_type is MatchType.NORMALIZED
+        assert description.match_type is MatchType.EXPECTED_DESCRIPTION
         assert evidence.matched_span == (0, 6)  # raw span includes both spaces
         assert "A  B功能"[0:6] == "A  B功能"
         assert evidence.transformations == ("N1",)
@@ -433,7 +474,12 @@ class TestRepeatedAndConflictingEvidence:
         result = verify_one(item, b0, b1)
         assert result.status is CheckStatus.CONFIGURED
         assert result.comparison_state is ComparisonState.SAME
-        assert len(result.evidence) == 2  # both inspectable
+        assert [(e.block_id, e.match_type) for e in result.evidence] == [
+            ("body:p0", MatchType.EXACT),
+            ("body:p0", MatchType.EXPECTED_DESCRIPTION),
+            ("body:p1", MatchType.EXACT),
+            ("body:p1", MatchType.EXPECTED_DESCRIPTION),
+        ]
 
     def test_conflicting_active_values_are_unresolved(self) -> None:
         item = make_item("dr-006", PHRASE, EXPECTED)
@@ -443,7 +489,10 @@ class TestRepeatedAndConflictingEvidence:
         assert result.resolution is Resolution.UNRESOLVED
         assert result.status is None
         assert "conflicting-key-parameters" in result.review_reasons
-        assert len(result.evidence) == 2  # both retained, neither dropped
+        assert [e.block_id for e in result.evidence if e.match_type is MatchType.EXACT] == [
+            "body:p0",
+            "body:p1",
+        ]
 
     def test_bare_mention_plus_valued_occurrence(self) -> None:
         item = make_item("dr-006", PHRASE, EXPECTED)
@@ -594,7 +643,7 @@ class TestTruthTable:
         result = verify_one(item, *blocks)
         assert result.resolution is expected_resolution
         assert result.status is expected_status
-        assert result.rule_revision == "task3-v1"
+        assert result.rule_revision == "field-match-v2"
 
 
 class TestDeterminismAndOrdering:
@@ -656,9 +705,9 @@ class TestCancellation:
         processed: list[str] = []
         original_collect = matching_module._collect_candidates
 
-        def spy_collect(item, norm, raw_text):  # type: ignore[no-untyped-def]
+        def spy_collect(item, norm, raw_text, terms):  # type: ignore[no-untyped-def]
             processed.append(item.item_id)
-            return original_collect(item, norm, raw_text)
+            return original_collect(item, norm, raw_text, terms)
 
         monkeypatch.setattr(matching_module, "_collect_candidates", spy_collect)
 

@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "task3-v1"
+RULE_REVISION = "field-match-v2"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
@@ -209,6 +209,8 @@ class MatchType(Enum):
     EXACT = "exact"
     NORMALIZED = "normalized"
     ALIAS = "alias"
+    FUNCTION_NAME = "function-name"
+    EXPECTED_DESCRIPTION = "expected-description"
 
 
 class StrikeCoverage(Enum):
@@ -241,9 +243,8 @@ class CheckItemAlias:
 class CheckItem:
     """Immutable baseline snapshot used for one verification run.
 
-    ``detection_phrase`` is the only configured detector; ``name`` labels the
-    item and is never used for matching. Persistence and checklist editing
-    belong to later slices.
+    The configured detection phrase, aliases and name can locate the
+    function. Expected-description hits alone provide review evidence.
     """
 
     item_id: str

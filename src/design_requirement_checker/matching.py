@@ -48,7 +48,13 @@ _PUNCT_MAP = {
 _BOUNDARY_CHARS = frozenset(";.!? ,、。")
 _SENTENCE_END_CHARS = frozenset(".!?。")
 #: Match-method reporting preference: exact → normalized → alias.
-_TYPE_RANK = {MatchType.EXACT: 0, MatchType.NORMALIZED: 1, MatchType.ALIAS: 2}
+_TYPE_RANK = {
+    MatchType.EXACT: 0,
+    MatchType.NORMALIZED: 1,
+    MatchType.ALIAS: 2,
+    MatchType.FUNCTION_NAME: 0,
+    MatchType.EXPECTED_DESCRIPTION: 0,
+}
 
 
 class VerificationCancelled(Exception):
@@ -239,28 +245,41 @@ def _association_blocker(
     return ""
 
 
-def _collect_candidates(item: CheckItem, norm: NormalizedText, raw_text: str) -> list[_Candidate]:
-    """Candidate search for one item against a normalized block.
-
-    This is the per-item matching unit: each call follows its own cancellation
-    checkpoint in ``verify``. Returns one candidate per (item, raw span),
-    keeping the best match method (exact → normalized → alias).
-    """
-    best: dict[tuple[str, tuple[int, int]], _Candidate] = {}
+def _search_terms(item: CheckItem) -> tuple[tuple[str, str, MatchType, str], ...]:
     terms: list[tuple[str, str, MatchType]] = [(item.detection_phrase, "", MatchType.EXACT)]
     terms.extend((alias.text, alias.alias_id, MatchType.ALIAS) for alias in item.aliases)
-    for term, alias_id, configured_type in terms:
-        term_norm = normalize(term).text
+    terms.extend(
+        (term, "", field)
+        for term, field in (
+            (item.name, MatchType.FUNCTION_NAME),
+            (item.expected_description, MatchType.EXPECTED_DESCRIPTION),
+        )
+        if term.strip()
+    )
+    return tuple((term, alias_id, kind, normalize(term).text) for term, alias_id, kind in terms)
+
+
+def _collect_candidates(
+    item: CheckItem,
+    norm: NormalizedText,
+    raw_text: str,
+    terms: Sequence[tuple[str, str, MatchType, str]],
+) -> list[_Candidate]:
+    """Search one item and block after its cancellation checkpoint.
+
+    Each field can report the same raw span. Phrase and alias hits share
+    a field and keep the best match method.
+    """
+    best: dict[tuple[MatchType, tuple[int, int]], _Candidate] = {}
+    for term, alias_id, configured_type, term_norm in terms:
         for norm_start, norm_end in _find_all(norm.text, term_norm):
             raw_span = map_span(norm, norm_start, norm_end)
-            if configured_type is MatchType.ALIAS:
-                match_type = MatchType.ALIAS
-            elif raw_text[raw_span[0] : raw_span[1]] == term:
-                match_type = MatchType.EXACT
-            else:
+            match_type = configured_type
+            if match_type is MatchType.EXACT and raw_text[raw_span[0] : raw_span[1]] != term:
                 match_type = MatchType.NORMALIZED
             candidate = _Candidate(item, term, alias_id, match_type, (norm_start, norm_end))
-            key = (item.item_id, raw_span)
+            field = MatchType.EXACT if configured_type is MatchType.ALIAS else configured_type
+            key = (field, raw_span)
             current = best.get(key)
             if current is None or _TYPE_RANK[match_type] < _TYPE_RANK[current.match_type]:
                 best[key] = candidate
@@ -280,14 +299,15 @@ def _associate_candidates(
     span (via the equivalent normalized span) then term text.
     """
     ordered = sorted(candidates, key=lambda c: (c.norm_span, c.term))
+    identity = [c for c in ordered if c.match_type is not MatchType.EXPECTED_DESCRIPTION]
 
     # Ambiguity: one raw span claimed by different term texts across items —
     # the text cannot safely establish which function identity applies.
     # Identical term texts on several items are a baseline-validation (Task 5)
     # configuration defect, not verification ambiguity.
     ambiguous: set[tuple[str, tuple[int, int]]] = set()
-    for i, left in enumerate(ordered):
-        for right in ordered[i + 1 :]:
+    for i, left in enumerate(identity):
+        for right in identity[i + 1 :]:
             if left.item.item_id == right.item.item_id or left.term == right.term:
                 continue
             left_raw = map_span(norm, left.norm_span[0], left.norm_span[1])
@@ -298,21 +318,22 @@ def _associate_candidates(
 
     # Requirement-span association: forward only, to the earliest boundary
     # delimiter, next qualifying match start or block end (S6 rule).
-    match_starts = [candidate.norm_span[0] for candidate in ordered]
+    match_starts = [candidate.norm_span[0] for candidate in identity]
     occurrences: list[_Occurrence] = []
     for candidate in ordered:
         norm_start, norm_end = candidate.norm_span
         raw_span = map_span(norm, norm_start, norm_end)
-        end = len(norm.text)
-        k = norm_end
-        while k < len(norm.text):
-            if _is_boundary(norm.text, k):
-                end = k
-                break
-            k += 1
-        for other_start in match_starts:
-            if norm_end <= other_start < end:
-                end = other_start
+        description_hit = candidate.match_type is MatchType.EXPECTED_DESCRIPTION
+        end = norm_end
+        if not description_hit:
+            end = len(norm.text)
+            for k in range(norm_end, len(norm.text)):
+                if _is_boundary(norm.text, k):
+                    end = k
+                    break
+            for other_start in match_starts:
+                if norm_end <= other_start < end:
+                    end = other_start
         requirement_text = norm.text[norm_start:end]
         raw_requirement_span = (
             norm.char_sources[norm_start][0],
@@ -342,9 +363,9 @@ def _associate_candidates(
                 requirement_text=requirement_text,
                 strike_coverage=_strike_coverage(block, raw_requirement_span),
                 value_tokens=_value_tokens(requirement_text),
-                comparison_blocker=_association_blocker(
-                    candidate.item, norm.text, candidate.norm_span, end
-                ),
+                comparison_blocker="unassociated-expected-description"
+                if description_hit
+                else _association_blocker(candidate.item, norm.text, candidate.norm_span, end),
                 ambiguous=(candidate.item.item_id, raw_span) in ambiguous,
             )
         )
@@ -406,7 +427,16 @@ def _classify(
             "nothing-to-compare",
             (),
         )
-    clean = [o for o in occurrences if not o.ambiguous]
+    identity = [o for o in occurrences if o.match_type is not MatchType.EXPECTED_DESCRIPTION]
+    if not identity:
+        return result(
+            Resolution.UNRESOLVED,
+            None,
+            ComparisonState.NOT_COMPARED,
+            "result-unresolved",
+            ("expected-description-only",),
+        )
+    clean = [o for o in identity if not o.ambiguous]
     if not clean:
         return result(
             Resolution.UNRESOLVED,
@@ -489,13 +519,14 @@ def verify(
     item order; evidence keeps stable source order (block, then span).
     """
     by_item: dict[str, list[_Occurrence]] = {item.item_id: [] for item in check_items}
+    item_terms = [(item, _search_terms(item)) for item in check_items]
     for block_index, block in enumerate(document.blocks):
         norm = normalize(block.text)
         candidates: list[_Candidate] = []
-        for item in check_items:
+        for item, terms in item_terms:
             if cancel_check is not None and cancel_check():
                 raise VerificationCancelled("verification cancelled at a checkpoint")
-            candidates.extend(_collect_candidates(item, norm, block.text))
+            candidates.extend(_collect_candidates(item, norm, block.text, terms))
         for occurrence in _associate_candidates(candidates, norm, block, block_index):
             by_item[occurrence.item.item_id].append(occurrence)
     results: list[CheckResult] = []

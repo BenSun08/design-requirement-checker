@@ -105,6 +105,13 @@ not start them without explicit owner authorization.
 [ ] target-desktop screenshots inspection
 ```
 
+## Approved matching follow-up
+
+- [x] Add independent function-name and expected-description hits, with
+  manual review for description-only evidence.
+- [ ] Associate matched GN headings with their description tables and display
+  the linked cell evidence in the review workspace.
+
 ## V0.2 backlog (CANDIDATE — unscheduled, not committed)
 
 Feature definitions and constraints: [spec.md §14](spec.md). Phasing:
