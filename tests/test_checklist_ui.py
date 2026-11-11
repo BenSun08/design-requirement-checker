@@ -341,17 +341,27 @@ class TestCandidatePreservation:
         gen_before = window._op_generation
 
         candidate = (_item("a"), _item("b", phrase="功能B"))
-        with patch("PySide6.QtWidgets.QMessageBox.critical") as critical:
-            page, mock_save, accepted = _save_via_page(
-                window,
-                candidate,
-                tmp_path,
-                save_side_effect=OSError("disk full"),
-            )
+        window._on_manage_clicked()
+        page = window._management_page
+        page.load_items(candidate)
+        with (
+            patch("PySide6.QtWidgets.QMessageBox.critical") as critical,
+            patch("PySide6.QtWidgets.QMessageBox.information") as information,
+            patch(
+                "design_requirement_checker.baseline_store.default_path",
+                return_value=tmp_path / "baseline.json",
+            ),
+            patch(
+                "design_requirement_checker.application.save_baseline_to",
+                side_effect=OSError("disk full"),
+            ) as mock_save,
+        ):
+            save = page.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save)
+            save.click()
 
         mock_save.assert_called_once()
         assert "磁盘写入错误" in critical.call_args.args[2]
-        assert accepted == []  # candidate still open
+        information.assert_not_called()
         assert page.current_items() == candidate
         _assert_feedback(page, "基准未保存", "已保留")
         assert window._check_items == existing  # current baseline unchanged
@@ -581,12 +591,27 @@ class TestChecklistWorkspace:
         _assert_feedback(page, "已删除", "B", "未保存")
         assert load_baseline_from(baseline_path).items == original
 
+        saved_notices = []
+
+        def acknowledge_save() -> None:
+            box = qapp.activeModalWidget()
+            if isinstance(box, QMessageBox):
+                saved_notices.append((box.icon(), box.text(), load_baseline_from(baseline_path)))
+                box.accept()
+
         with patch(
             "design_requirement_checker.baseline_store.default_path", return_value=baseline_path
         ):
             save = page.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save)
+            QTimer.singleShot(0, acknowledge_save)
             save.click()
+            qapp.processEvents()
 
+        assert len(saved_notices) == 1
+        icon, text, saved = saved_notices[0]
+        assert icon == QMessageBox.Icon.Information
+        assert "保存成功" in text and "2 项" in text and "本地" in text
+        assert saved.items == (first, last)
         assert load_baseline_from(baseline_path).items == (first, last)
         assert window._nav_tabs.tabText(1) == "检查项管理 (2)"
         _assert_feedback(page, "基准已保存")

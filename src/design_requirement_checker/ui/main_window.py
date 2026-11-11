@@ -843,12 +843,15 @@ class MainWindow(QMainWindow):
         self._nav_tabs.setCurrentIndex(0)
 
     def _on_management_saved(self) -> None:
-        """A save fully succeeded (handler already published + persisted).
+        """Keep the saved snapshot in sync and confirm the completed write."""
+        from PySide6.QtWidgets import QMessageBox
 
-        Mark the page as synced with the just-installed snapshot so the next
-        activation keeps it instead of rebuilding the identical tuple.
-        """
         self._management_source = self._check_items
+        QMessageBox.information(
+            self,
+            "基准保存成功",
+            f"基准保存成功。\n已将 {len(self._check_items)} 项检查项保存到本地。",
+        )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Never accept close while any owned QThread is still running.
