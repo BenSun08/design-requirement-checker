@@ -120,7 +120,7 @@ successfully checked supported scope (UI wording: 在已检查范围内未找到
 证据; not proof of physical absence). **STRUCK_OUT** — all qualifying
 occurrences are fully struck with no active/partial/unknown qualifying
 occurrence. **UNRESOLVED (待人工核查)** — uncertain partial/unknown strike,
-active+struck coexistence, conflicting key values across active occurrences,
+unexplained active+struck coexistence, conflicting key values across active occurrences,
 or ambiguous function identity; status unset, reasons shown, all evidence
 shown.
 
@@ -166,6 +166,18 @@ positions. Unknown formatting, incomplete edits, and unresolved conflicts
 still require manual review. The review workspace shows the surviving
 description, a partial-strike reminder for configured results, and the
 unmodified source with its strike formatting.
+
+An inline replacement can also provide active evidence when the struck
+fragment starts at a clause boundary and the following unstruck text repeats
+its opening Han characters. The entire surviving description must exactly
+match the normalized baseline for this rule.
+
+When all qualifying evidence belongs to one function table with an active
+heading match, fully struck rows can coexist with live rows. All live
+descriptions must align with the complete baseline description and agree on
+active parameter values. This supports CONFIGURED, including description
+differences from the baseline. The review workspace selects live evidence
+and retains the struck rows with a review reminder.
 
 No fuzzy or semantic matching in v0.1.
 

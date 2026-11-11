@@ -60,6 +60,7 @@ from design_requirement_checker.domain import (
     MatchEvidence,
     MatchType,
     Resolution,
+    StrikeCoverage,
     TextRun,
 )
 from design_requirement_checker.ui import style
@@ -92,6 +93,7 @@ _REASON_LABELS: dict[str, str] = {
     "partial-strike-active-description": "部分划线，已按有效描述核查",
     "unknown-strike-formatting": "划线格式未知",
     "active-and-struck-coexist": "生效与划线共存",
+    "struck-rows-with-active-description": "同一功能表含已划除条款，已按有效描述核查",
     "conflicting-key-parameters": "关键参数冲突",
     "ambiguous-function-identity": "功能身份歧义",
     "expected-description-only": "仅命中预期要求，需确认功能归属",
@@ -1093,11 +1095,19 @@ class MainWindow(QMainWindow):
                 f"color: {style.DIFFERENCE}; font-size: 12px; font-weight: 600;"
             )
             left.addWidget(diff_label)
-        if (
-            result.status is CheckStatus.CONFIGURED
-            and "partial-strike-active-description" in result.review_reasons
-        ):
-            strike_label = QLabel("部分划线")
+        if result.status is CheckStatus.CONFIGURED:
+            strike_reminders = [
+                label
+                for reason, label in (
+                    ("partial-strike-active-description", "部分划线"),
+                    ("struck-rows-with-active-description", "含已划除条款"),
+                )
+                if reason in result.review_reasons
+            ]
+        else:
+            strike_reminders = []
+        if strike_reminders:
+            strike_label = QLabel(" · ".join(strike_reminders))
             strike_label.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
             left.addWidget(strike_label)
         layout.addLayout(left, 1)
@@ -1296,6 +1306,12 @@ class MainWindow(QMainWindow):
             actual_body = f"<p>定位原文：{html.escape(selected_raw)}</p>"
         elif selected is not None and selected.match_type is MatchType.EXPECTED_DESCRIPTION:
             actual_body = f"<p>候选原文：{html.escape(selected_raw)}</p>"
+        elif (
+            result.status is CheckStatus.CONFIGURED
+            and selected is not None
+            and selected.strike_coverage is StrikeCoverage.FULL
+        ):
+            actual_body = f"<p>已划除条款：<s>{html.escape(selected_raw)}</s></p>"
         elif result.status is CheckStatus.MISSING:
             actual_body = (
                 "<p>在已检查范围内未找到匹配证据。</p><p>请人工确认文档是否使用了其他表述。</p>"

@@ -122,6 +122,45 @@ class TestGNTableVerification:
             (len(leading + old), len(leading + old + trailing)),
         )
 
+    @pytest.mark.parametrize("separator", ["；", "，"])
+    def test_exact_description_survives_an_inline_struck_replacement(
+        self, tmp_path, separator
+    ) -> None:
+        leading = f"收到启用信号后延时30min{separator}"
+        old = "控制期间持续供电"
+        current = "控制期间允许待机"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx", ((leading, False), (old, True), (current, False))
+        )
+        result = self._verify(path, leading + current)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        assert result.review_reasons == ("partial-strike-active-description",)
+        (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert evidence.raw_text == leading + old + current
+        assert evidence.description_source_text == leading + current
+        assert evidence.active_description_spans == (
+            (0, len(leading)),
+            (len(leading + old), len(leading + old + current)),
+        )
+
+    def test_inline_replacement_keeps_separately_struck_whitespace(self, tmp_path) -> None:
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (
+                ("收到启用信号；", False),
+                ("控制期间持续供电", True),
+                (" ", False),
+                (" ", True),
+                ("控制期间允许待机", False),
+            ),
+        )
+        result = self._verify(path, "收到启用信号； 控制期间允许待机")
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+
     @pytest.mark.parametrize(
         "runs",
         [
@@ -232,6 +271,94 @@ class TestGNTableVerification:
             StrikeCoverage.FULL,
             StrikeCoverage.NONE,
         ]
+
+    @pytest.mark.parametrize(
+        ("delay", "comparison"),
+        [("30min", ComparisonState.SAME), ("15min", ComparisonState.DIFFERENT)],
+    )
+    def test_complete_active_row_can_coexist_with_a_fully_struck_row(
+        self, tmp_path, delay, comparison
+    ) -> None:
+        actual = f"采集ON信号，延时{delay}；停止驱动（D30）"
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("旧条款，延时60min", True), (actual, False))
+        )
+        result = self._verify(path)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is comparison
+        assert result.review_reasons == ("struck-rows-with-active-description",)
+        struck, active = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert struck.strike_coverage is StrikeCoverage.FULL
+        assert active.description_source_text == actual
+        assert result.primary_evidence_id == active.evidence_id
+
+    def test_fully_struck_row_does_not_hide_conflicting_active_rows(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx",
+            (
+                ("旧条款，延时60min", True),
+                ("采集ON信号，延时30min；停止驱动（D30）", False),
+                ("采集ON信号，延时15min；停止驱动（D30）", False),
+            ),
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.status is None
+        assert "conflicting-key-parameters" in result.review_reasons
+
+    def test_struck_row_exception_requires_all_live_rows_in_the_table_to_align(
+        self, tmp_path
+    ) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx",
+            (
+                ("旧条款，延时60min", True),
+                ("采集ON信号，延时30min；停止驱动（D30）", False),
+                ("采集ON信号，延时30min；停止驱动（D31）", False),
+            ),
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("active-and-struck-coexist",)
+
+    def test_struck_row_exception_does_not_override_another_function_table(self, tmp_path) -> None:
+        expected = "延时30min后允许输出"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧条款", True),),
+            ((expected, False),),
+            next_section_rows=((("延时30min后禁止输出", False),),),
+        )
+        result = self._verify(path, expected)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("active-and-struck-coexist",)
+
+    def test_struck_row_exception_requires_a_live_heading_identity(self, tmp_path) -> None:
+        expected = "延时30min后允许输出"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧条款", True),),
+            ((expected, False),),
+            heading_struck=True,
+            row_name="无标识",
+        )
+        result = self._verify(path, expected)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("active-and-struck-coexist",)
+
+    def test_struck_row_exception_requires_more_than_a_bare_identity(self, tmp_path) -> None:
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("延时30min后关闭输出", True), ("票机延时", False))
+        )
+        result = self._verify(path, "票机延时")
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("active-and-struck-coexist",)
 
     def test_multi_paragraph_description_requires_review(self, tmp_path) -> None:
         path = fixtures.build_gn_requirements(
