@@ -1655,9 +1655,9 @@ class MainWindow(QMainWindow):
     def _save_baseline_snapshot(self, new_items: tuple[CheckItem, ...]) -> bool:
         """Validate → confirm → persist → publish one candidate snapshot.
 
-        Returns True only when the snapshot was persisted AND published;
-        the checklist dialog closes only on that True. Any earlier failure
-        leaves the current baseline, results and load state untouched.
+        Returns True only when the snapshot was persisted and published.
+        Any earlier failure leaves the current baseline, results and load
+        state untouched.
         """
         from design_requirement_checker.application import save_baseline_to, validate_baseline
         from design_requirement_checker.baseline_store import (
@@ -1692,7 +1692,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if reply is not QMessageBox.StandardButton.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 self.statusBar().showMessage("已取消保存")
                 return False
 
@@ -1707,7 +1707,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if reply is not QMessageBox.StandardButton.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 self.statusBar().showMessage("已取消保存")
                 return False
 
@@ -1748,7 +1748,7 @@ class MainWindow(QMainWindow):
         if self._baseline_load_state in ("backup", "load-error", "no-baseline"):
             self._baseline_load_state = "normal"
             self.clear_baseline_banner()
-        self.statusBar().showMessage("检查基准已变更 — 请重新核查以生成新结果")
+        self.statusBar().showMessage("检查基准已保存 — 请重新核查以生成新结果")
         return True
 
     def set_check_items(

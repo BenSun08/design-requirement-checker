@@ -229,6 +229,11 @@ default window is 1440 × 900 with a 1024 × 600 minimum.
   flagged for explicit confirmation; empty expected description allowed.
 - Disable is reversible; delete requires confirmation. Disabled items are
   persisted but excluded from the next run.
+- Add, edit, enable, disable, and confirmed delete update the list and its
+  item count immediately. The page names the action and item and indicates
+  that the changes are pending until Save Baseline (保存基准) succeeds.
+- The page confirms successful saves. If a save fails or is cancelled, the
+  page shows that the baseline was not saved and retains the pending edits.
 - Saving invalidates current results; rerun required. Baseline edits never
   silently corrupt or discard the saved data (see §10).
 - No multi-baseline, customer/order templates, roles or synchronization in
