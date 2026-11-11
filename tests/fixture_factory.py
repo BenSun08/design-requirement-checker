@@ -97,19 +97,24 @@ def build_gn_description_runs(
     *rows: tuple[tuple[str, bool], ...],
     heading_struck: bool = False,
     row_name: str = "票机延时",
+    next_section_rows: tuple[tuple[tuple[str, bool], ...], ...] = (),
 ) -> Path:
     """GN description rows with independently styled Word runs."""
     doc = Document()
-    heading = doc.add_paragraph("GN36：")
-    heading.add_run("票机延时退电功能").font.strike = heading_struck
-    table = doc.add_table(rows=1, cols=2)
-    table.cell(0, 0).text = "名称"
-    table.cell(0, 1).text = "功能描述"
-    for runs in rows:
-        name, description = table.add_row().cells
-        name.text = row_name
-        for text, struck in runs:
-            description.paragraphs[0].add_run(text).font.strike = struck
+    sections = [("GN36", rows)]
+    if next_section_rows:
+        sections.append(("GN37", next_section_rows))
+    for code, section_rows in sections:
+        heading = doc.add_paragraph(f"{code}：")
+        heading.add_run("票机延时退电功能").font.strike = heading_struck
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "名称"
+        table.cell(0, 1).text = "功能描述"
+        for runs in section_rows:
+            name, description = table.add_row().cells
+            name.text = row_name
+            for text, struck in runs:
+                description.paragraphs[0].add_run(text).font.strike = struck
     doc.save(path)
     return path
 

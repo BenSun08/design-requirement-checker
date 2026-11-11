@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "partial-strike-v4"
+RULE_REVISION = "active-description-v5"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.

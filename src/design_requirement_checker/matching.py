@@ -189,6 +189,7 @@ class _Occurrence:
     value_tokens: frozenset[str]
     comparison_blocker: str
     ambiguous: bool
+    active_table_heading: bool = False
 
 
 def _find_all(haystack: str, needle: str) -> list[tuple[int, int]]:
@@ -276,6 +277,28 @@ def _separate_struck_clause(text: str, start: int, end: int) -> bool:
     )
 
 
+def _inline_clause_replacement(text: str, start: int, end: int, next_strike: int) -> bool:
+    """Recognize the start of the same Chinese clause in adjacent old and live text."""
+    before = text[:start].rstrip(_STRIKE_WHITESPACE)
+    if before and before[-1] not in ",，" and not _is_clause_separator(text, len(before) - 1):
+        return False
+    old = text[start:end].lstrip(_STRIKE_WHITESPACE)
+    current = text[end:next_strike].lstrip(_STRIKE_WHITESPACE)
+    # Two literal Han characters anchor the restarted clause. Isolated
+    # negations, operators and fragments of a quantity cannot be anchors.
+    lead = old[:2]
+    return (
+        re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]{2}", lead) is not None
+        and current.startswith(lead)
+        and not any(_is_clause_separator(text, index) for index in range(start, end))
+    )
+
+
+def _is_bare_identity(item: CheckItem, text: str) -> bool:
+    terms = (item.detection_phrase, item.name, *(alias.text for alias in item.aliases))
+    return any(text == normalize(term).text for term in terms)
+
+
 def _active_description_spans(
     block: DocumentBlock,
     occurrence: _Occurrence,
@@ -308,11 +331,17 @@ def _active_description_spans(
 
     active: list[tuple[int, int]] = []
     cursor = 0
-    for left, right in struck:
-        if not raw[left:right].strip(_STRIKE_WHITESPACE):
-            continue  # Preserve whitespace separators even if their runs are struck.
+    has_inline_replacement = False
+    # Whitespace-only strikes remain in the projection, including between
+    # the old clause and its active replacement.
+    substantive = [
+        (left, right) for left, right in struck if raw[left:right].strip(_STRIKE_WHITESPACE)
+    ]
+    for (left, right), (next_strike, _) in pairwise([*substantive, (len(raw), len(raw))]):
         if not _separate_struck_clause(raw, left, right):
-            return ()
+            if not _inline_clause_replacement(raw, left, right, next_strike):
+                return ()
+            has_inline_replacement = True
         if cursor < left:
             active.append((start + cursor, start + left))
         cursor = right
@@ -320,13 +349,10 @@ def _active_description_spans(
         active.append((start + cursor, end))
 
     surviving = normalize("".join(block.text[left:right] for left, right in active)).text
-    identity_terms = (
-        occurrence.item.detection_phrase,
-        occurrence.item.name,
-        *(alias.text for alias in occurrence.item.aliases),
-    )
-    if surviving in (normalize(term).text for term in identity_terms):
+    if _is_bare_identity(occurrence.item, surviving):
         return ()
+    if has_inline_replacement:
+        return tuple(active) if surviving == expected else ()
     surviving_structure, _ = _description_signature(surviving)
     expected_structure, _ = _description_signature(expected)
     return tuple(active) if surviving_structure == expected_structure else ()
@@ -604,6 +630,7 @@ def _associate_table_descriptions(
                     if coverage is StrikeCoverage.PARTIAL and not heading_active
                     else "",
                     ambiguous=False,
+                    active_table_heading=heading_active,
                 )
             )
     return located, uncertain
@@ -633,6 +660,38 @@ def _conflicting_active_values(active: Sequence[_Occurrence], baseline: str | No
             if structure == expected_structure:
                 aligned_values.add(values)
     return len(aligned_values) > 1
+
+
+def _struck_rows_have_active_descriptions(
+    document: Document,
+    active: Sequence[_Occurrence],
+    struck: Sequence[_Occurrence],
+    baseline: str,
+) -> bool:
+    """Apply the exception only to evidence in a single actively identified GN table."""
+    if (
+        not active
+        or not baseline.strip(_STRIKE_WHITESPACE)
+        or _is_bare_identity(active[0].item, baseline)
+    ):
+        return False
+    table_indices: set[int] = set()
+    for occurrence in (*active, *struck):
+        cell = document.blocks[occurrence.block_index].location.cell
+        if (
+            occurrence.match_type is not MatchType.TABLE_DESCRIPTION
+            or not occurrence.active_table_heading
+            or cell is None
+        ):
+            return False
+        table_indices.add(cell.table_index)
+    expected_structure, _ = _description_signature(baseline)
+    return len(table_indices) == 1 and all(
+        not occurrence.comparison_blocker
+        and not _is_bare_identity(occurrence.item, occurrence.requirement_text)
+        and _description_signature(occurrence.requirement_text)[0] == expected_structure
+        for occurrence in active
+    )
 
 
 def _classify(
@@ -680,11 +739,7 @@ def _classify(
         review_reasons: tuple[str, ...],
     ) -> CheckResult:
         initial = primary
-        if (
-            comparison_state is ComparisonState.DIFFERENT
-            and primary
-            and not primary.can_compare_description
-        ):
+        if status is CheckStatus.CONFIGURED and primary and not primary.can_compare_description:
             initial = next((e for e in evidence if e.can_compare_description), primary)
         return CheckResult(
             check_item=item,
@@ -748,9 +803,17 @@ def _classify(
             active.append(replace(o, requirement_text=text, value_tokens=_value_tokens(text)))
             projected = True
     reminders = ("partial-strike-active-description",) if projected else ()
+    struck_rows_explained = False
     if active and struck:
-        reasons.append("active-and-struck-coexist")
-    if _conflicting_active_values(active, expected_norm if projected else None):
+        struck_rows_explained = _struck_rows_have_active_descriptions(
+            document, active, struck, expected_norm
+        )
+        if struck_rows_explained:
+            reminders = (*reminders, "struck-rows-with-active-description")
+        else:
+            reasons.append("active-and-struck-coexist")
+    conflict_baseline = expected_norm if projected or struck_rows_explained else None
+    if _conflicting_active_values(active, conflict_baseline):
         reasons.append("conflicting-key-parameters")
     if reasons:
         return result(

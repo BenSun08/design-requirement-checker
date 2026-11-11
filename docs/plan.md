@@ -258,7 +258,12 @@ Python, pip, Qt or Office automation.
 Feature definitions live in [spec.md §14](spec.md); the actionable backlog in
 [tasks.md](tasks.md). Phasing only:
 
-The partial-strike follow-up is implemented on a branch as rule revision
+Rule revision `active-description-v5` is implemented on a branch. It covers
+exact inline replacements and complete, consistent live descriptions
+alongside fully struck rows in one function table. Synthetic DOCX and Qt
+tests exercise both cases and the selection of live evidence.
+
+The partial-strike follow-up merged in PR #21 as rule revision
 `partial-strike-v4`. It uses complete surviving clauses and their source
 spans for description comparison and shows a review reminder in Qt.
 Synthetic DOCX regressions cover separable deletions, incomplete edits, and
