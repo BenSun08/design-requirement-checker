@@ -130,16 +130,32 @@ def _active_rules(text: str) -> tuple[str, ...]:
     return tuple(rule for rule in ("N1", "N2", "N3") if rule in rules)
 
 
-# --- value tokens (conflict detection only, never comparison) ---------------
+# --- value tokens -----------------------------------------------------------
 
 _VALUE_TOKEN_RE = re.compile(
     r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?) ?"
     r"(km/h|kHz|MHz|mV|kW|ms|min|mm|cm|km|Hz|V|A|W|h|m|s|%)"
 )
+_STANDALONE_QUANTITY = re.compile(
+    rf"(?<![A-Za-z0-9_.+\-]){_VALUE_TOKEN_RE.pattern}(?![A-Za-z0-9_])", re.ASCII
+)
 
 
 def _value_tokens(normalized_text: str) -> frozenset[str]:
     return frozenset(f"{number}{unit}" for number, unit in _VALUE_TOKEN_RE.findall(normalized_text))
+
+
+def _description_signature(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Keep the literal structure and the standalone quantities in source order."""
+    parts: list[str] = []
+    values: list[str] = []
+    end = 0
+    for quantity in _STANDALONE_QUANTITY.finditer(text):
+        parts.extend((text[end : quantity.start()], text[quantity.end(1) : quantity.end()]))
+        values.append(quantity[1])
+        end = quantity.end()
+    parts.append(text[end:])
+    return tuple(parts), tuple(values)
 
 
 # --- occurrence collection ---------------------------------------------------
@@ -216,6 +232,104 @@ def _strike_coverage(block: DocumentBlock, raw_span: tuple[int, int]) -> StrikeC
     if all(piece is False for piece in pieces):
         return StrikeCoverage.NONE
     return StrikeCoverage.PARTIAL
+
+
+_CLAUSE_SEPARATORS = _SENTENCE_END_CHARS | {";"}
+_STRIKE_WHITESPACE = "".join(_WS_CHARS | _BREAK_CHARS)
+
+
+def _is_clause_separator(text: str, index: int) -> bool:
+    char = _PUNCT_MAP.get(text[index], text[index])
+    if char not in _CLAUSE_SEPARATORS:
+        return False
+    before, after = text[max(index - 1, 0) : index], text[index + 1 : index + 2]
+    if char in ".。" and before.isdigit() and after.isdigit():
+        return False
+    if (
+        char == "."
+        and before.isascii()
+        and (before.isalnum() or before == "_")
+        and after.isascii()
+        and (after.isalnum() or after == "_")
+    ):
+        return False  # Decimal point or separator inside an ASCII identifier.
+    return char != "!" or _PUNCT_MAP.get(after, after) != "="
+
+
+def _separate_struck_clause(text: str, start: int, end: int) -> bool:
+    """Require a complete clause and leave a separator between surviving clauses."""
+    before = text[:start].rstrip(_STRIKE_WHITESPACE)
+    after = text[end:].lstrip(_STRIKE_WHITESPACE)
+    left_edge = len(before)
+    right_edge = len(text) - len(after)
+    fragment = text[start:end]
+    first = end - len(fragment.lstrip(_STRIKE_WHITESPACE))
+    last = start + len(fragment.rstrip(_STRIKE_WHITESPACE)) - 1
+    if not any(char.isalnum() for char in fragment):
+        return False
+    left_boundary = not before or _is_clause_separator(text, left_edge - 1)
+    right_boundary = not after or _is_clause_separator(text, right_edge)
+    return (
+        (left_boundary or _is_clause_separator(text, first))
+        and (right_boundary or _is_clause_separator(text, last))
+        and (left_boundary or right_boundary)
+    )
+
+
+def _active_description_spans(
+    block: DocumentBlock,
+    occurrence: _Occurrence,
+    expected: str,
+) -> tuple[tuple[int, int], ...]:
+    """Prove the surviving description against the baseline and retain raw offsets."""
+    if (
+        occurrence.strike_coverage is not StrikeCoverage.PARTIAL
+        or occurrence.comparison_blocker
+        or occurrence.ambiguous
+        or not expected.strip(_STRIKE_WHITESPACE)
+    ):
+        return ()
+    if occurrence.match_type is not MatchType.TABLE_DESCRIPTION and (
+        _strike_coverage(block, occurrence.raw_match_span) is not StrikeCoverage.NONE
+    ):
+        return ()
+    start, end = occurrence.raw_requirement_span
+    raw = block.text[start:end]
+    struck: list[tuple[int, int]] = []
+    for run in block.runs:
+        left = max(start, run.start_offset) - start
+        right = min(end, run.end_offset) - start
+        if run.effective_strike is not True or left >= right:
+            continue
+        if struck and struck[-1][1] == left:
+            struck[-1] = (struck[-1][0], right)
+        else:
+            struck.append((left, right))
+
+    active: list[tuple[int, int]] = []
+    cursor = 0
+    for left, right in struck:
+        if not raw[left:right].strip(_STRIKE_WHITESPACE):
+            continue  # Preserve whitespace separators even if their runs are struck.
+        if not _separate_struck_clause(raw, left, right):
+            return ()
+        if cursor < left:
+            active.append((start + cursor, start + left))
+        cursor = right
+    if cursor < len(raw):
+        active.append((start + cursor, end))
+
+    surviving = normalize("".join(block.text[left:right] for left, right in active)).text
+    identity_terms = (
+        occurrence.item.detection_phrase,
+        occurrence.item.name,
+        *(alias.text for alias in occurrence.item.aliases),
+    )
+    if surviving in (normalize(term).text for term in identity_terms):
+        return ()
+    surviving_structure, _ = _description_signature(surviving)
+    expected_structure, _ = _description_signature(expected)
+    return tuple(active) if surviving_structure == expected_structure else ()
 
 
 def _association_blocker(
@@ -460,10 +574,19 @@ def _associate_table_descriptions(
             continue
         indices, uncertain_section = _description_blocks(document, start + 1, end)
         uncertain |= uncertain_section
+        heading = document.blocks[start]
+        heading_active = any(
+            occurrence.block_index == start
+            and occurrence.match_type is not MatchType.EXPECTED_DESCRIPTION
+            and not occurrence.ambiguous
+            and _strike_coverage(heading, occurrence.raw_match_span) is StrikeCoverage.NONE
+            for occurrence in occurrences
+        )
         for index in indices:
             block = document.blocks[index]
             normalized = normalize(block.text).text
             span = (0, len(block.text))
+            coverage = _strike_coverage(block, span)
             located.append(
                 _Occurrence(
                     block_index=index,
@@ -475,9 +598,11 @@ def _associate_table_descriptions(
                     raw_match_span=span,
                     raw_requirement_span=span,
                     requirement_text=normalized,
-                    strike_coverage=_strike_coverage(block, span),
+                    strike_coverage=coverage,
                     value_tokens=_value_tokens(normalized),
-                    comparison_blocker="",
+                    comparison_blocker="inactive-function-table-heading"
+                    if coverage is StrikeCoverage.PARTIAL and not heading_active
+                    else "",
                     ambiguous=False,
                 )
             )
@@ -487,12 +612,36 @@ def _associate_table_descriptions(
 # --- classification ----------------------------------------------------------
 
 
+def _conflicting_active_values(active: Sequence[_Occurrence], baseline: str | None) -> bool:
+    value_sets = {
+        o.value_tokens
+        for o in active
+        if o.value_tokens and o.comparison_blocker != _OVERLAPPING_IDENTITY
+    }
+    if len(value_sets) > 1:
+        return True
+    if baseline is None:
+        return False
+
+    # Projected descriptions already align to the baseline, so each
+    # corresponding parameter can be compared in its original position.
+    expected_structure, _ = _description_signature(baseline)
+    aligned_values: set[tuple[str, ...]] = set()
+    for occurrence in active:
+        if not occurrence.comparison_blocker:
+            structure, values = _description_signature(occurrence.requirement_text)
+            if structure == expected_structure:
+                aligned_values.add(values)
+    return len(aligned_values) > 1
+
+
 def _classify(
     item: CheckItem,
     occurrences: Sequence[_Occurrence],
     document: Document,
     uncertain_table: bool,
 ) -> CheckResult:
+    expected_norm = normalize(item.expected_description).text
     evidence = tuple(
         MatchEvidence(
             evidence_id=f"{item.item_id}@{occurrence.block_index}:{index}",
@@ -510,6 +659,9 @@ def _classify(
             alias_id=occurrence.alias_id,
             ambiguous=occurrence.ambiguous,
             comparison_blocker=occurrence.comparison_blocker,
+            active_description_spans=_active_description_spans(
+                document.blocks[occurrence.block_index], occurrence, expected_norm
+            ),
         )
         for index, occurrence in enumerate(occurrences)
     )
@@ -556,8 +708,8 @@ def _classify(
             (),
         )
     qualifying = [
-        o
-        for o in occurrences
+        (o, e)
+        for o, e in zip(occurrences, evidence, strict=True)
         if o.match_type is not MatchType.EXPECTED_DESCRIPTION
         and o.comparison_blocker != _TABLE_LOCATOR
     ]
@@ -569,7 +721,7 @@ def _classify(
             "result-unresolved",
             ("uncertain-function-table" if uncertain_table else "expected-description-only",),
         )
-    clean = [o for o in qualifying if not o.ambiguous]
+    clean = [(o, e) for o, e in qualifying if not o.ambiguous]
     reasons = ["uncertain-function-table"] if uncertain_table else []
     if not clean:
         reasons.append("ambiguous-function-identity")
@@ -580,22 +732,26 @@ def _classify(
             "result-unresolved",
             tuple(reasons),
         )
-    active = [o for o in clean if o.strike_coverage is StrikeCoverage.NONE]
-    struck = [o for o in clean if o.strike_coverage is StrikeCoverage.FULL]
-    if any(o.strike_coverage is StrikeCoverage.PARTIAL for o in clean):
+    active = [o for o, _ in clean if o.strike_coverage is StrikeCoverage.NONE]
+    struck = [o for o, _ in clean if o.strike_coverage is StrikeCoverage.FULL]
+    if any(
+        o.strike_coverage is StrikeCoverage.PARTIAL and not e.active_description_spans
+        for o, e in clean
+    ):
         reasons.append("partial-strike")
-    if any(o.strike_coverage is StrikeCoverage.UNKNOWN for o in clean):
+    if any(o.strike_coverage is StrikeCoverage.UNKNOWN for o, _ in clean):
         reasons.append("unknown-strike-formatting")
+    projected = False
+    for o, e in clean:
+        if e.active_description_spans:
+            text = normalize(e.description_source_text).text
+            active.append(replace(o, requirement_text=text, value_tokens=_value_tokens(text)))
+            projected = True
+    reminders = ("partial-strike-active-description",) if projected else ()
     if active and struck:
         reasons.append("active-and-struck-coexist")
-    if active:
-        value_sets = [
-            o.value_tokens
-            for o in active
-            if o.value_tokens and o.comparison_blocker != _OVERLAPPING_IDENTITY
-        ]
-        if len(value_sets) >= 2 and any(v != value_sets[0] for v in value_sets[1:]):
-            reasons.append("conflicting-key-parameters")
+    if _conflicting_active_values(active, expected_norm if projected else None):
+        reasons.append("conflicting-key-parameters")
     if reasons:
         return result(
             Resolution.UNRESOLVED,
@@ -629,9 +785,8 @@ def _classify(
             CheckStatus.CONFIGURED,
             ComparisonState.NOT_COMPARED,
             active[0].comparison_blocker or "mixed-comparison-occurrences",
-            (),
+            reminders,
         )
-    expected_norm = normalize(item.expected_description).text
     matched = [o.requirement_text == expected_norm for o in comparable]
     if all(matched):
         state, reason = ComparisonState.SAME, ""
@@ -639,7 +794,7 @@ def _classify(
         state, reason = ComparisonState.DIFFERENT, ""
     else:
         state, reason = ComparisonState.NOT_COMPARED, "mixed-comparison-occurrences"
-    return result(Resolution.RESOLVED, CheckStatus.CONFIGURED, state, reason, ())
+    return result(Resolution.RESOLVED, CheckStatus.CONFIGURED, state, reason, reminders)
 
 
 def verify(

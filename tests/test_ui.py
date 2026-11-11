@@ -1576,6 +1576,41 @@ class TestStatusSpecificPresentation:
 
 
 class TestMultiEvidence:
+    @pytest.mark.parametrize(
+        ("delay", "comparison"), [("30min", "描述一致"), ("15min", "描述有差异")]
+    )
+    def test_partial_strike_shows_active_description_and_reminder(
+        self, qapp, tmp_path, delay, comparison
+    ) -> None:
+        active = f"采集ON信号，延时{delay}；停止驱动（D30）"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx", (("已划除的旧说明；", True), (active, False))
+        )
+        document = import_document(path)
+        assert isinstance(document, Document)
+        item = CheckItem(
+            item_id="gn36",
+            code="FD-GN36",
+            name="票机延时退电功能",
+            detection_phrase="票机延时",
+            expected_description="采集ON信号，延时30min；停止驱动（D30）",
+        )
+        (result,) = verify_document(document, (item,)).results
+        window = MainWindow(check_items=(item,))
+        window.set_document(document)
+        try:
+            assert window.complete_verification(window._op_generation, (result,))
+            window._set_filter("仅异常")
+            assert window._result_list.count() == 1
+            detail = window._detail_view.toPlainText()
+            assert "已配置" in detail
+            assert comparison in detail
+            assert f"有效描述：{active}" in detail
+            assert "部分划线，已按有效描述核查" in detail
+            assert "已划除的旧说明" in detail
+        finally:
+            window.close()
+
     def test_gn_difference_opens_table_cell_and_labels_other_hits(self, qapp, tmp_path) -> None:
         actual = "采集ON信号，延时15min；停止驱动（D30）"
         path = fixtures.build_gn_requirements(tmp_path / "gn.docx", ((actual, False),))

@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "structured-match-v3"
+RULE_REVISION = "partial-strike-v4"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
@@ -277,7 +277,8 @@ class MatchEvidence:
     stored (unnormalized) text. ``comparison_blocker`` carries a stable reason
     token when this occurrence cannot safely take part in description
     comparison; ``ambiguous`` marks spans claimed by different configured term
-    texts across items.
+    texts across items. ``active_description_spans`` records the source
+    fragments used for a comparison after safe removal of struck clauses.
     """
 
     evidence_id: str
@@ -295,6 +296,7 @@ class MatchEvidence:
     alias_id: str = ""
     ambiguous: bool = False
     comparison_blocker: str = ""
+    active_description_spans: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.evidence_id:
@@ -311,6 +313,19 @@ class MatchEvidence:
             raise ValueError("requirement_span must be a non-empty raw span")
         if not (req_start <= start and end <= req_end):
             raise ValueError("the matched span must lie inside the requirement span")
+        if self.active_description_spans and self.strike_coverage is not StrikeCoverage.PARTIAL:
+            raise ValueError("active description spans require partial strike")
+        previous_end = req_start
+        for active_start, active_end in self.active_description_spans:
+            if not (previous_end <= active_start < active_end <= req_end):
+                raise ValueError("active description spans must be ordered within the requirement")
+            previous_end = active_end
+
+    @property
+    def description_source_text(self) -> str:
+        """Original characters used for description comparison."""
+        spans = self.active_description_spans or (self.requirement_span,)
+        return "".join(self.raw_text[start:end] for start, end in spans)
 
     @property
     def can_compare_description(self) -> bool:
@@ -318,7 +333,7 @@ class MatchEvidence:
         return (
             not self.comparison_blocker
             and not self.ambiguous
-            and self.strike_coverage is StrikeCoverage.NONE
+            and (self.strike_coverage is StrikeCoverage.NONE or bool(self.active_description_spans))
         )
 
 

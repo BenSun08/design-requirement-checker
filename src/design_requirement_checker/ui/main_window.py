@@ -86,9 +86,10 @@ _MATCH_TYPE_LABELS = {
     MatchType.TABLE_DESCRIPTION: "功能描述表格关联",
 }
 
-# UI-only mapping of stable UNRESOLVED reason tokens to Chinese text.
+# UI-only mapping of review reason and reminder tokens to Chinese text.
 _REASON_LABELS: dict[str, str] = {
     "partial-strike": "部分划线",
+    "partial-strike-active-description": "部分划线，已按有效描述核查",
     "unknown-strike-formatting": "划线格式未知",
     "active-and-struck-coexist": "生效与划线共存",
     "conflicting-key-parameters": "关键参数冲突",
@@ -1089,6 +1090,13 @@ class MainWindow(QMainWindow):
                 f"color: {style.DIFFERENCE}; font-size: 12px; font-weight: 600;"
             )
             left.addWidget(diff_label)
+        if (
+            result.status is CheckStatus.CONFIGURED
+            and "partial-strike-active-description" in result.review_reasons
+        ):
+            strike_label = QLabel("部分划线")
+            strike_label.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+            left.addWidget(strike_label)
         layout.addLayout(left, 1)
         status_text = self._status_text(result)
         status_label = QLabel(status_text)
@@ -1150,7 +1158,10 @@ class MainWindow(QMainWindow):
             or result.resolution is Resolution.UNRESOLVED
             or (
                 result.status is CheckStatus.CONFIGURED
-                and result.comparison_state is ComparisonState.DIFFERENT
+                and (
+                    result.comparison_state is ComparisonState.DIFFERENT
+                    or bool(result.review_reasons)
+                )
             )
         )
 
@@ -1228,10 +1239,7 @@ class MainWindow(QMainWindow):
         selected = (
             evidence[self._evidence_index] if 0 <= self._evidence_index < len(evidence) else None
         )
-        selected_raw = ""
-        if selected is not None:
-            start, end = selected.requirement_span
-            selected_raw = selected.raw_text[start:end]
+        selected_raw = selected.description_source_text if selected is not None else ""
         actual_text = selected.requirement_text if selected is not None else ""
         if selected is not None and selected.match_type is MatchType.TABLE_DESCRIPTION:
             actual_text = selected_raw
@@ -1277,7 +1285,9 @@ class MainWindow(QMainWindow):
             f'<p style="color: {style.MUTED}; font-size: 12px"><b>预期要求 · 检查基准</b></p>'
             f"<p>期望描述：{html.escape(item.expected_description)}</p>"
         )
-        if show_difference:
+        if selected is not None and selected.active_description_spans:
+            actual_body = f"<p>有效描述：{html.escape(selected_raw)}</p>"
+        elif show_difference:
             actual_body = f"<p>实际描述：{html.escape(selected_raw)}</p>"
         elif selected is not None and selected.comparison_blocker == "function-table-locator":
             actual_body = f"<p>定位原文：{html.escape(selected_raw)}</p>"
@@ -1325,7 +1335,8 @@ class MainWindow(QMainWindow):
             reasons = "".join(
                 f"<li>{html.escape(_REASON_LABELS.get(r, r))}</li>" for r in result.review_reasons
             )
-            parts.append(f"<p>核查原因：</p><ul>{reasons}</ul>")
+            label = "核查原因" if result.resolution is Resolution.UNRESOLVED else "核查提醒"
+            parts.append(f"<p>{label}：</p><ul>{reasons}</ul>")
 
         # .evidence — occurrence links, position, and the review caveat.
         parts.append("<p><b>匹配证据</b></p>")
