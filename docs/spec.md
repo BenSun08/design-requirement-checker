@@ -99,11 +99,12 @@ Semantics of the core concepts (exact fields are visible in
   (RESOLVED/UNRESOLVED), `CheckStatus` (set only when RESOLVED), evidence
   list, `primary_evidence_id` (initial UI selection aid only),
   `ComparisonState` (SAME/DIFFERENT/NOT_COMPARED), review reasons, rule
-  revision.
+  revision. A resolved result can carry a review reminder.
 - **MatchEvidence** — raw text, matched span(s), requirement span(s),
   matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS/FUNCTION_NAME/
   EXPECTED_DESCRIPTION/TABLE_DESCRIPTION),
-  transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), explanation.
+  transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), and raw
+  source spans for any accepted surviving description.
 - **MatchType** — FUZZY, MANUAL and SEMANTIC are reserved names for
   separately approved future features, not implemented behavior.
 
@@ -118,7 +119,7 @@ satisfied). **MISSING** — no qualifying evidence found within the
 successfully checked supported scope (UI wording: 在已检查范围内未找到匹配
 证据; not proof of physical absence). **STRUCK_OUT** — all qualifying
 occurrences are fully struck with no active/partial/unknown qualifying
-occurrence. **UNRESOLVED (待人工核查)** — partial/unknown strike,
+occurrence. **UNRESOLVED (待人工核查)** — uncertain partial/unknown strike,
 active+struck coexistence, conflicting key values across active occurrences,
 or ambiguous function identity; status unset, reasons shown, all evidence
 shown.
@@ -153,6 +154,18 @@ description cell requires manual review.
 The review pane opens on a linked description when available and labels the
 independent hit types. Source spans stay separate and all hits remain in
 source order. Full rules are in [constitution.md §7](constitution.md).
+
+A partially struck description can provide active evidence when the strike
+covers separable whole clauses or only whitespace, the identity match is
+unambiguous and active, and the surviving text matches the full normalized
+baseline with at most changes to standalone numeric quantities of the same
+units. Separators between surviving clauses remain in the source. Quantity
+structure establishes completeness. Description comparison and conflict
+detection use the actual surviving values, including aligned parameter
+positions. Unknown formatting, incomplete edits, and unresolved conflicts
+still require manual review. The review workspace shows the surviving
+description, a partial-strike reminder for configured results, and the
+unmodified source with its strike formatting.
 
 No fuzzy or semantic matching in v0.1.
 

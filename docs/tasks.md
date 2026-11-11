@@ -105,12 +105,14 @@ not start them without explicit owner authorization.
 [ ] target-desktop screenshots inspection
 ```
 
-## Matching follow-up (implemented on branch; review pending)
+## Matching follow-up
 
 - [x] Add independent function-name and expected-description hits, with
-  manual review for description-only evidence.
+  manual review for description-only evidence (merged in PR #20).
 - [x] Associate matched GN headings with their description tables and display
-  the linked cell evidence in the review workspace.
+  the linked cell evidence in the review workspace (merged in PR #20).
+- [x] Compare independently complete active descriptions in partially
+  struck evidence and show a review reminder (implemented on branch).
 
 ## V0.2 backlog (CANDIDATE — unscheduled, not committed)
 

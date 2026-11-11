@@ -40,7 +40,9 @@ from design_requirement_checker.matching import RULE_REVISION
 
 class TestGNTableVerification:
     @staticmethod
-    def _verify(path) -> CheckResult:  # type: ignore[no-untyped-def]
+    def _verify(
+        path, expected_description: str = "采集ON信号，延时30min；停止驱动（D30）"
+    ) -> CheckResult:  # type: ignore[no-untyped-def]
         document = import_document(path)
         assert isinstance(document, Document)
         item = CheckItem(
@@ -48,7 +50,7 @@ class TestGNTableVerification:
             code="FD-GN36",
             name="票机延时退电功能",
             detection_phrase="票机延时",
-            expected_description="采集ON信号，延时30min；停止驱动（D30）",
+            expected_description=expected_description,
         )
         (result,) = verify_document(document, (item,)).results
         return result
@@ -93,6 +95,129 @@ class TestGNTableVerification:
         (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
         assert evidence.strike_coverage is StrikeCoverage.FULL
         assert any(e.match_type is MatchType.FUNCTION_NAME for e in result.evidence)
+
+    @pytest.mark.parametrize(
+        ("delay", "comparison"),
+        [("30min", ComparisonState.SAME), ("15min", ComparisonState.DIFFERENT)],
+    )
+    def test_complete_active_description_survives_struck_clause(
+        self, tmp_path, delay, comparison
+    ) -> None:
+        leading = f"采集ON信号，延时{delay}；"
+        old = "旧说明：等待45min再重试；"
+        trailing = "停止驱动（D30）"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx", ((leading, False), (old, True), (trailing, False))
+        )
+        result = self._verify(path)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is comparison
+        assert result.review_reasons == ("partial-strike-active-description",)
+        (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert evidence.strike_coverage is StrikeCoverage.PARTIAL
+        assert evidence.raw_text == leading + old + trailing
+        assert evidence.active_description_spans == (
+            (0, len(leading)),
+            (len(leading + old), len(leading + old + trailing)),
+        )
+
+    @pytest.mark.parametrize(
+        "runs",
+        [
+            (("采集", False), ("未", True), ("ON信号，延时30min；停止驱动（D30）", False)),
+            (("未", True), ("采集ON信号，延时30min；停止驱动（D30）", False)),
+            (("采集ON信号，延时3", False), (".", True), ("0min；停止驱动（D30）", False)),
+            (("采集ON信号，延时", False), ("30min", True), ("；停止驱动（D30）", False)),
+            (("采集ON信号，延时30min；停止驱动（", False), ("D30", True), ("）", False)),
+            (
+                ("采集ON信号，延时30min；", False),
+                ("旧说明；", True),
+                ("停止驱动（D31）", False),
+            ),
+        ],
+    )
+    def test_partial_strike_remains_unresolved_if_description_cannot_be_established(
+        self, tmp_path, runs
+    ) -> None:
+        result = self._verify(fixtures.build_gn_description_runs(tmp_path / "gn.docx", runs))
+
+        assert result.status is None
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.comparison_state is ComparisonState.NOT_COMPARED
+        assert result.review_reasons == ("partial-strike",)
+
+    def test_struck_whitespace_preserves_the_original_separator(self, tmp_path) -> None:
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("采集ON信号，延时30", False), (" ", True), ("min；停止驱动（D30）", False)),
+        )
+        expected = "采集ON信号，延时30 min；停止驱动（D30）"
+        result = self._verify(path, expected)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        (evidence,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert evidence.description_source_text == expected
+        assert evidence.strike_coverage is StrikeCoverage.PARTIAL
+
+    def test_partial_strike_without_baseline_description_stays_unresolved(self, tmp_path) -> None:
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧说明；", True), ("采集ON信号，延时30min；停止驱动（D30）", False)),
+        )
+        result = self._verify(path, "")
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("partial-strike",)
+
+    @pytest.mark.parametrize(("struck", "number"), [("３．", "0"), ("3.", "０")])
+    def test_mixed_width_decimal_point_does_not_split_a_quantity(
+        self, tmp_path, struck, number
+    ) -> None:
+        active = f"{number}min；停止驱动"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx", ((struck, True), (active, False))
+        )
+        result = self._verify(path, active)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("partial-strike",)
+
+    def test_surviving_parameters_still_conflict_with_other_active_rows(self, tmp_path) -> None:
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧说明：延时15min；", True), ("采集ON信号，延时30min；停止驱动（D30）", False)),
+            (("采集ON信号，延时15min；停止驱动（D30）", False),),
+        )
+        result = self._verify(path)
+
+        assert result.status is None
+        assert "conflicting-key-parameters" in result.review_reasons
+
+    def test_swapped_parameter_values_in_active_clauses_are_a_conflict(self, tmp_path) -> None:
+        expected = "启动延时30min；关机延时15min"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧说明；", True), (expected, False)),
+            (("启动延时15min；关机延时30min", False),),
+        )
+        result = self._verify(path, expected)
+
+        assert result.status is None
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("conflicting-key-parameters",)
+
+    def test_partial_description_cannot_restore_a_struck_heading_identity(self, tmp_path) -> None:
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("旧说明；", True), ("采集ON信号，延时30min；停止驱动（D30）", False)),
+            heading_struck=True,
+            row_name="无标识",
+        )
+        result = self._verify(path)
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("partial-strike",)
 
     def test_conflicting_table_rows_are_both_retained(self, tmp_path) -> None:
         path = fixtures.build_gn_requirements(

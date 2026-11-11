@@ -258,11 +258,17 @@ Python, pip, Qt or Office automation.
 Feature definitions live in [spec.md §14](spec.md); the actionable backlog in
 [tasks.md](tasks.md). Phasing only:
 
-The function-name and description follow-up is implemented on a branch.
-Rule revision `structured-match-v3` searches each field independently and
-uses existing block coordinates for GN-scoped description association.
-Synthetic DOCX tests exercise section boundaries, strike conflicts and
-whole-description comparison. Real-document review remains pending.
+The partial-strike follow-up is implemented on a branch as rule revision
+`partial-strike-v4`. It uses complete surviving clauses and their source
+spans for description comparison and shows a review reminder in Qt.
+Synthetic DOCX regressions cover separable deletions, incomplete edits, and
+conflicting surviving parameters.
+
+The function-name and description follow-up merged in PR #20. Rule revision
+`structured-match-v3` searches each field independently and uses existing
+block coordinates for GN-scoped description association. Synthetic DOCX tests
+exercise section boundaries, strike conflicts, and whole-description
+comparison.
 
 ```text
 Milestone A — v0.1 Internal Demo        DONE (2026-09-23)

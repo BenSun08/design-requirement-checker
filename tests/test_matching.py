@@ -689,7 +689,7 @@ class TestTruthTable:
         result = verify_one(item, *blocks)
         assert result.resolution is expected_resolution
         assert result.status is expected_status
-        assert result.rule_revision == "structured-match-v3"
+        assert result.rule_revision == "partial-strike-v4"
 
 
 class TestDeterminismAndOrdering:

@@ -177,13 +177,16 @@ paragraph or table-cell paragraph. Unsafe associations remain explicit.
 An expected-description hit without identity evidence requires manual review.
 
 Strike coverage is `NONE | FULL | PARTIAL | UNKNOWN` evaluated over the
-associated requirement span. Classification:
+associated requirement span. A partially struck span can provide active
+evidence when whole struck clauses can be separated and the surviving
+description is complete against the baseline. Preserve the raw span, original
+strike coverage, surviving source spans, and a review reminder. Classification:
 
 ```text
 consistent active evidence            → RESOLVED / CONFIGURED
 all qualifying evidence fully struck  → RESOLVED / STRUCK_OUT
 no qualifying evidence                → RESOLVED / MISSING
-partial strike / unknown strike / active+struck coexistence /
+partial strike with unproven active text / unknown strike / active+struck coexistence /
 conflicting active key values / ambiguous function identity /
 description-only hit / uncertain function table
                                       → UNRESOLVED / status=None
@@ -221,7 +224,8 @@ Result presentation invariants: `total = configured + missing + struck_out +
 unresolved`; description-difference count is orthogonal. Default ordering:
 UNRESOLVED → MISSING → STRUCK_OUT → CONFIGURED+DIFFERENT → remaining
 CONFIGURED, preserving baseline order within groups. `仅异常` includes
-MISSING, STRUCK_OUT, UNRESOLVED and CONFIGURED+DIFFERENT. Filters/search
+MISSING, STRUCK_OUT, UNRESOLVED, and CONFIGURED with differences or review
+reminders. Filters/search
 must not recompute verification. UI uses human-facing Chinese labels while
 domain tokens stay stable.
 
