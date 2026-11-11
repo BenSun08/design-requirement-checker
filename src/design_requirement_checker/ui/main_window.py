@@ -83,6 +83,7 @@ _MATCH_TYPE_LABELS = {
     MatchType.ALIAS: "别名匹配",
     MatchType.FUNCTION_NAME: "功能名称匹配",
     MatchType.EXPECTED_DESCRIPTION: "预期要求匹配",
+    MatchType.TABLE_DESCRIPTION: "功能描述表格关联",
 }
 
 # UI-only mapping of stable UNRESOLVED reason tokens to Chinese text.
@@ -93,6 +94,7 @@ _REASON_LABELS: dict[str, str] = {
     "conflicting-key-parameters": "关键参数冲突",
     "ambiguous-function-identity": "功能身份歧义",
     "expected-description-only": "仅命中预期要求，需确认功能归属",
+    "uncertain-function-table": "无法可靠确定功能描述表格或描述范围",
 }
 
 # UI-only mapping for comparison_reason tokens. Domain tokens are left
@@ -1186,7 +1188,14 @@ class MainWindow(QMainWindow):
 
     def _show_detail(self, result: CheckResult) -> None:
         self._detail_result = result
-        self._evidence_index = 0
+        self._evidence_index = next(
+            (
+                i
+                for i, evidence in enumerate(result.evidence)
+                if evidence.evidence_id == result.primary_evidence_id
+            ),
+            0,
+        )
         self._render_detail()
 
     def _select_evidence(self, index: int) -> None:
@@ -1219,7 +1228,18 @@ class MainWindow(QMainWindow):
         selected = (
             evidence[self._evidence_index] if 0 <= self._evidence_index < len(evidence) else None
         )
+        selected_raw = ""
+        if selected is not None:
+            start, end = selected.requirement_span
+            selected_raw = selected.raw_text[start:end]
         actual_text = selected.requirement_text if selected is not None else ""
+        if selected is not None and selected.match_type is MatchType.TABLE_DESCRIPTION:
+            actual_text = selected_raw
+        show_difference = (
+            result.comparison_state is ComparisonState.DIFFERENT
+            and selected is not None
+            and selected.can_compare_description
+        )
         match_method = (
             _MATCH_TYPE_LABELS.get(selected.match_type, "") if selected is not None else ""
         )
@@ -1257,15 +1277,12 @@ class MainWindow(QMainWindow):
             f'<p style="color: {style.MUTED}; font-size: 12px"><b>预期要求 · 检查基准</b></p>'
             f"<p>期望描述：{html.escape(item.expected_description)}</p>"
         )
-        actual_raw = ""
-        if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
-            # DIFFERENT results must explain themselves: the raw readable
-            # actual text plus a where-do-they-differ rendering. The raw
-            # requirement slice is the source text — never the normalized
-            # comparison form (presentation only; matching is unchanged).
-            req_start, req_end = selected.requirement_span
-            actual_raw = selected.raw_text[req_start:req_end]
-            actual_body = f"<p>实际描述：{html.escape(actual_raw)}</p>"
+        if show_difference:
+            actual_body = f"<p>实际描述：{html.escape(selected_raw)}</p>"
+        elif selected is not None and selected.comparison_blocker == "function-table-locator":
+            actual_body = f"<p>定位原文：{html.escape(selected_raw)}</p>"
+        elif selected is not None and selected.match_type is MatchType.EXPECTED_DESCRIPTION:
+            actual_body = f"<p>候选原文：{html.escape(selected_raw)}</p>"
         elif result.status is CheckStatus.MISSING:
             actual_body = (
                 "<p>在已检查范围内未找到匹配证据。</p><p>请人工确认文档是否使用了其他表述。</p>"
@@ -1289,11 +1306,11 @@ class MainWindow(QMainWindow):
         )
 
         # .diff-banner — where the two descriptions differ, in place.
-        if result.comparison_state is ComparisonState.DIFFERENT and selected is not None:
+        if show_difference:
             parts.append(
                 '<table width="100%" cellspacing="0" cellpadding="10" border="0"><tr>'
                 f'<td bgcolor="{style.WARNING_BG}"><b>差异详情：</b>'
-                f"{_description_diff_html(item.expected_description, actual_raw)}"
+                f"{_description_diff_html(item.expected_description, selected_raw)}"
                 "<br>功能已出现但描述不同，请人工核实订单要求。</td></tr></table>"
             )
 
@@ -1320,7 +1337,9 @@ class MainWindow(QMainWindow):
         elif evidence:
             if len(evidence) > 1:
                 links = " ".join(
-                    f'<a href="evidence:{i}">证据 {i + 1}</a>' for i in range(len(evidence))
+                    f'<a href="evidence:{i}">证据 {i + 1} · '
+                    f"{_MATCH_TYPE_LABELS[entry.match_type]}</a>"
+                    for i, entry in enumerate(evidence)
                 )
                 parts.append(f"<p>{links}</p>")
             if selected is not None:

@@ -20,6 +20,7 @@ from design_requirement_checker.application import (
     VerificationOutcome,
     VerificationState,
     import_document,
+    verify_document,
 )
 from design_requirement_checker.domain import (
     BlockType,
@@ -1575,6 +1576,36 @@ class TestStatusSpecificPresentation:
 
 
 class TestMultiEvidence:
+    def test_gn_difference_opens_table_cell_and_labels_other_hits(self, qapp, tmp_path) -> None:
+        actual = "采集ON信号，延时15min；停止驱动（D30）"
+        path = fixtures.build_gn_requirements(tmp_path / "gn.docx", ((actual, False),))
+        document = import_document(path)
+        assert isinstance(document, Document)
+        item = CheckItem(
+            item_id="gn36",
+            code="FD-GN36",
+            name="票机延时退电功能",
+            detection_phrase="票机延时",
+            expected_description="采集ON信号，延时30min；停止驱动（D30）",
+        )
+        (result,) = verify_document(document, (item,)).results
+        window = MainWindow(check_items=(item,))
+        window.set_document(document)
+        window._show_detail(result)
+
+        text = window._detail_view.toPlainText()
+        assert f"实际描述：{actual}" in text
+        assert "功能名称匹配" in text
+        assert "预期要求匹配" in text
+        assert "功能描述表格关联" in text
+        assert "差异详情" in text
+
+        window._select_evidence(0)
+        text = window._detail_view.toPlainText()
+        assert "定位原文" in text
+        assert "差异详情" not in text
+        window.close()
+
     def test_evidence_selector_shows_all_occurrences(self, qapp) -> None:
         ev1 = _evidence(evidence_id="e1", requirement_text="第一处需求")
         ev2 = _evidence(evidence_id="e2", requirement_text="第二处需求")

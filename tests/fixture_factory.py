@@ -11,6 +11,7 @@ controls, text boxes, hidden vertically-merged-cell content).
 """
 
 from pathlib import Path
+from typing import Literal
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
@@ -55,6 +56,67 @@ def build_table(path: Path) -> Path:
     cell.text = "cell para A"
     cell.add_paragraph("cell para B")
     doc.add_paragraph("outro")
+    doc.save(path)
+    return path
+
+
+def build_gn_requirements(
+    path: Path,
+    rows: tuple[tuple[str, bool], ...],
+    *,
+    description_header: str = "功能描述",
+    extra_paragraph: str = "",
+) -> Path:
+    """GN headings, editable description rows, and an exact hit in the next section."""
+    doc = Document()
+    doc.add_paragraph("GN36：票机延时退电功能")
+    table = doc.add_table(rows=1, cols=3)
+    table.cell(0, 0).text = "序号"
+    table.cell(0, 1).text = "名称"
+    table.cell(0, 2).text = description_header
+    for number, (description, struck) in enumerate(rows, 1):
+        serial, name, content = table.add_row().cells
+        serial.text = str(number)
+        name.paragraphs[0].add_run("票机延时").font.strike = struck
+        content.paragraphs[0].add_run(description).font.strike = struck
+    if extra_paragraph:
+        table.cell(1, 2).add_paragraph(extra_paragraph)
+
+    doc.add_paragraph("GN37：车外灯检查功能")
+    next_table = doc.add_table(rows=2, cols=2)
+    next_table.cell(0, 0).text = "名称"
+    next_table.cell(0, 1).text = "功能描述"
+    next_table.cell(1, 0).text = "车外灯检查"
+    next_table.cell(1, 1).text = "采集ON信号，延时30min；停止驱动（D30）"
+    doc.save(path)
+    return path
+
+
+def build_gn_grid_table(
+    path: Path, layout: Literal["leading-omission", "excluded-cell", "merged-header"]
+) -> Path:
+    """A description column whose Word grid position can differ from cell order."""
+    doc = Document()
+    doc.add_paragraph("GN36：票机延时退电功能")
+    table = doc.add_table(rows=2, cols=3)
+    table.cell(0, 0).text = "名称"
+    table.cell(0, 1).text = "功能描述"
+    table.cell(0, 2).text = "备注"
+    table.cell(1, 0).text = "票机延时"
+    table.cell(1, 1).text = "采集ON信号，延时30min；停止驱动（D30）"
+    table.cell(1, 2).text = "应当保持为备注"
+    if layout == "merged-header":
+        table.cell(0, 1).merge(table.cell(0, 2)).text = "功能描述"
+    else:
+        row = table.rows[1]._tr
+        first_cell = row.tc_lst[0]
+        if layout == "leading-omission":
+            row.remove(first_cell)
+            row.insert(0, _raw(f'<w:trPr {NSDECL}><w:gridBefore w:val="1"/></w:trPr>'))
+        else:
+            wrapper = _raw(f"<w:sdt {NSDECL}><w:sdtContent/></w:sdt>")
+            row.replace(first_cell, wrapper)
+            wrapper[0].append(first_cell)
     doc.save(path)
     return path
 

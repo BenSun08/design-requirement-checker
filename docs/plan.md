@@ -258,12 +258,11 @@ Python, pip, Qt or Office automation.
 Feature definitions live in [spec.md §14](spec.md); the actionable backlog in
 [tasks.md](tasks.md). Phasing only:
 
-The approved function-name and description follow-up extends the pure
-matching engine and evidence labels. Implement independent field hits and
-description-only review first, then GN-scoped table association using
-existing block coordinates. Cover field provenance, section boundaries,
-strike conflicts, and whole-description comparison in focused tests before
-running the full quality gates.
+The function-name and description follow-up is implemented on a branch.
+Rule revision `structured-match-v3` searches each field independently and
+uses existing block coordinates for GN-scoped description association.
+Synthetic DOCX tests exercise section boundaries, strike conflicts and
+whole-description comparison. Real-document review remains pending.
 
 ```text
 Milestone A — v0.1 Internal Demo        DONE (2026-09-23)

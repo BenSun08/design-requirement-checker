@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "field-match-v2"
+RULE_REVISION = "structured-match-v3"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
@@ -44,10 +44,13 @@ class TableCellCoordinates:
     table_index: int
     row_index: int
     column_index: int
+    column_span: int = 1
 
     def __post_init__(self) -> None:
         if min(self.table_index, self.row_index, self.column_index) < 0:
             raise ValueError("cell indexes must be non-negative")
+        if self.column_span < 1:
+            raise ValueError("a cell must cover at least one grid column")
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,7 @@ class Document:
     warnings: tuple[str, ...] = ()
     supported_scope: tuple[str, ...] = SUPPORTED_SCOPE
     ingestion_state: IngestionState = IngestionState.READY
+    limited_table_indices: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.document_id or not self.filename or not self.content_fingerprint:
@@ -204,13 +208,14 @@ class ComparisonState(Enum):
 
 
 class MatchType(Enum):
-    """Initial deterministic match methods; FUZZY/MANUAL/SEMANTIC stay reserved."""
+    """Deterministic match methods and structured evidence sources."""
 
     EXACT = "exact"
     NORMALIZED = "normalized"
     ALIAS = "alias"
     FUNCTION_NAME = "function-name"
     EXPECTED_DESCRIPTION = "expected-description"
+    TABLE_DESCRIPTION = "table-description"
 
 
 class StrikeCoverage(Enum):
@@ -266,7 +271,7 @@ class CheckItem:
 
 @dataclass(frozen=True)
 class MatchEvidence:
-    """One qualifying occurrence with original-document spans.
+    """One observed occurrence with original-document spans.
 
     All spans are raw half-open code-point ranges into the identified block's
     stored (unnormalized) text. ``comparison_blocker`` carries a stable reason
@@ -306,6 +311,15 @@ class MatchEvidence:
             raise ValueError("requirement_span must be a non-empty raw span")
         if not (req_start <= start and end <= req_end):
             raise ValueError("the matched span must lie inside the requirement span")
+
+    @property
+    def can_compare_description(self) -> bool:
+        """Whether this source span can support an active description comparison."""
+        return (
+            not self.comparison_blocker
+            and not self.ambiguous
+            and self.strike_coverage is StrikeCoverage.NONE
+        )
 
 
 @dataclass(frozen=True)

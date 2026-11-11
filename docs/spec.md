@@ -102,7 +102,7 @@ Semantics of the core concepts (exact fields are visible in
   revision.
 - **MatchEvidence** — raw text, matched span(s), requirement span(s),
   matched term, alias id, `MatchType` (EXACT/NORMALIZED/ALIAS/FUNCTION_NAME/
-  EXPECTED_DESCRIPTION),
+  EXPECTED_DESCRIPTION/TABLE_DESCRIPTION),
   transformations, strike coverage (NONE/FULL/PARTIAL/UNKNOWN), explanation.
 - **MatchType** — FUZZY, MANUAL and SEMANTIC are reserved names for
   separately approved future features, not implemented behavior.
@@ -133,12 +133,26 @@ percentages exist anywhere; a text match is not a calibrated probability.
 Deterministic detection only. Conservative normalization allowlist (N1
 whitespace runs, N2 within-block line breaks, N3 selected full-width
 punctuation), raw↔normalized offset traceability, numbers/units/negation/
-operators/case preserved distinctly. A description-only hit requires manual
-review. Forward-only requirement-span
-association within one paragraph/cell; uncertain association is explicit.
-Strike evaluated over the requirement span. All qualifying occurrences are
-retained in source order. Full rules:
-[constitution.md §7](constitution.md).
+operators/case preserved distinctly. Identity hits come from the detection
+phrase, aliases, or function name. A nonblank expected description can also
+produce independent substring hits. Description hits without identity
+evidence require manual review. Plain-text spans associate forward within one
+paragraph or cell paragraph. Overlapping identity hits remain visible, with
+the configured phrase or alias span used for description and parameter
+comparison when the identity is unambiguous. A name and a phrase from
+different check items claiming the same span are ambiguous.
+
+A matched body heading starting with `GN<number>:` scopes a function section
+up to the next such heading or the document end. A unique top-level table
+with a unique `功能描述` header in its first row identifies the description
+column. The associated cells supply full-paragraph text and strike evidence
+for that section. Its identity hits remain available as location evidence.
+Another item claiming the heading, an uncertain column or continuation,
+excluded content in the linked table, or multiple nonblank paragraphs in a
+description cell requires manual review.
+The review pane opens on a linked description when available and labels the
+independent hit types. Source spans stay separate and all hits remain in
+source order. Full rules are in [constitution.md §7](constitution.md).
 
 No fuzzy or semantic matching in v0.1.
 
@@ -301,22 +315,6 @@ Not scheduled, not committed; each needs a product decision first.
 - **Baseline version / history support** — Status: V0.2 candidate. Goal:
   inspect what changed between baseline revisions. Constraint: run
   provenance must remain explainable.
-
-### Approved follow-up
-
-- **Function name and description matching** — Search configured detection
-  phrases and aliases, the function name, and a nonblank expected description
-  independently using the existing normalization allowlist and substring
-  search. Preserve the source of each hit. A description hit without a
-  phrase, alias, or name hit requires manual review.
-- **GN function table association** — A matching body heading of the form
-  `GN<number>: <name>` can locate its description table before the next GN
-  heading. Use a unique top-level table whose first row contains a unique
-  `功能描述` header. Evaluate each nonblank description cell after the header
-  using its original strike formatting and compare its full normalized
-  paragraph with the expected description. Keep the heading and other
-  identity hits as location evidence. Missing or ambiguous associations and
-  cells with multiple nonblank paragraphs require manual review.
 
 ### Later / exploratory — NOT COMMITTED
 

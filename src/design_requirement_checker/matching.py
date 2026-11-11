@@ -1,19 +1,17 @@
 """Pure deterministic verification: detection, evidence and classification.
 
-Implements the Task 3 contract (docs/constitution.md §7, validated by the
-executed S6 spike — see docs/plan.md §4): the exact normalization
-allowlist (N1/N2/N3) with raw-offset traceability, configured-phrase/alias
-detection, forward-only requirement-span association, strike coverage over the
-requirement span, the confirmed resolution truth table and the independent
-expected-description comparison. Inputs and outputs are domain values only;
-this module must stay free of Qt, python-docx and filesystem dependencies.
+Uses the normalization allowlist and forward-only paragraph spans from the
+Task 3 contract, plus independent field matching and GN description-table
+association. Each piece of evidence keeps a raw span in one document block.
+Inputs and outputs are domain values only.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import pairwise
 
 from design_requirement_checker.domain import (
     RULE_REVISION,
@@ -27,6 +25,7 @@ from design_requirement_checker.domain import (
     MatchType,
     Resolution,
     StrikeCoverage,
+    TableCellCoordinates,
 )
 
 # --- normalization allowlist (S6: N1/N2/N3 only; nothing else) --------------
@@ -47,6 +46,9 @@ _PUNCT_MAP = {
 #: deliberately NOT normalized (rejected R1) but are recognized as boundaries.
 _BOUNDARY_CHARS = frozenset(";.!? ,、。")
 _SENTENCE_END_CHARS = frozenset(".!?。")
+_GN_HEADING = re.compile(r"^ *GN[0-9]+ *:")
+_TABLE_LOCATOR = "function-table-locator"
+_OVERLAPPING_IDENTITY = "overlapping-identity-hit"
 #: Match-method reporting preference: exact → normalized → alias.
 _TYPE_RANK = {
     MatchType.EXACT: 0,
@@ -165,7 +167,6 @@ class _Occurrence:
     match_type: MatchType
     transformations: tuple[str, ...]
     raw_match_span: tuple[int, int]
-    norm_span: tuple[int, int]
     raw_requirement_span: tuple[int, int]
     requirement_text: str
     strike_coverage: StrikeCoverage
@@ -301,14 +302,15 @@ def _associate_candidates(
     ordered = sorted(candidates, key=lambda c: (c.norm_span, c.term))
     identity = [c for c in ordered if c.match_type is not MatchType.EXPECTED_DESCRIPTION]
 
-    # Ambiguity: one raw span claimed by different term texts across items —
-    # the text cannot safely establish which function identity applies.
-    # Identical term texts on several items are a baseline-validation (Task 5)
-    # configuration defect, not verification ambiguity.
+    # Identical terms within the same field are baseline-validation warnings.
+    # An overlap across items and fields can claim the same source identity.
     ambiguous: set[tuple[str, tuple[int, int]]] = set()
     for i, left in enumerate(identity):
         for right in identity[i + 1 :]:
-            if left.item.item_id == right.item.item_id or left.term == right.term:
+            same_field = (left.match_type is MatchType.FUNCTION_NAME) == (
+                right.match_type is MatchType.FUNCTION_NAME
+            )
+            if left.item.item_id == right.item.item_id or (same_field and left.term == right.term):
                 continue
             left_raw = map_span(norm, left.norm_span[0], left.norm_span[1])
             right_raw = map_span(norm, right.norm_span[0], right.norm_span[1])
@@ -349,6 +351,21 @@ def _associate_candidates(
                 )
             )
         )
+        if description_hit:
+            blocker = "unassociated-expected-description"
+        elif candidate.match_type is MatchType.FUNCTION_NAME and any(
+            other.item.item_id == candidate.item.item_id
+            and other.match_type is not MatchType.FUNCTION_NAME
+            and norm_start < other.norm_span[1]
+            and other.norm_span[0] < norm_end
+            and (other.item.item_id, map_span(norm, *other.norm_span)) not in ambiguous
+            for other in identity
+        ):
+            # The same occurrence can report both identity fields. Compare
+            # the configured phrase span once to avoid conflicting slices.
+            blocker = _OVERLAPPING_IDENTITY
+        else:
+            blocker = _association_blocker(candidate.item, norm.text, candidate.norm_span, end)
         occurrences.append(
             _Occurrence(
                 block_index=block_index,
@@ -358,25 +375,123 @@ def _associate_candidates(
                 match_type=candidate.match_type,
                 transformations=transformations,
                 raw_match_span=raw_span,
-                norm_span=candidate.norm_span,
                 raw_requirement_span=raw_requirement_span,
                 requirement_text=requirement_text,
                 strike_coverage=_strike_coverage(block, raw_requirement_span),
                 value_tokens=_value_tokens(requirement_text),
-                comparison_blocker="unassociated-expected-description"
-                if description_hit
-                else _association_blocker(candidate.item, norm.text, candidate.norm_span, end),
+                comparison_blocker=blocker,
                 ambiguous=(candidate.item.item_id, raw_span) in ambiguous,
             )
         )
     return occurrences
 
 
+# --- structured function sections --------------------------------------------
+
+
+def _description_blocks(document: Document, start: int, end: int) -> tuple[list[int], bool]:
+    """Locate one description column and keep each source paragraph separate."""
+    blocks = document.blocks
+    headers: set[TableCellCoordinates] = set()
+    for block in blocks[start:end]:
+        location = block.location
+        cell = location.cell
+        if (
+            cell is not None
+            and not location.ancestor_path
+            and cell.row_index == 0
+            and block.text.strip() == "功能描述"
+        ):
+            headers.add(cell)
+    if len(headers) != 1:
+        return [], True
+
+    (header,) = headers
+    table_index, column = header.table_index, header.column_index
+    if header.column_span != 1 or table_index in document.limited_table_indices:
+        return [], True
+    rows: dict[int, list[int]] = {}
+    populated_rows: set[int] = set()
+    uncertain = False
+    for index in range(start, end):
+        block = blocks[index]
+        location = block.location
+        cell = location.cell
+        if cell is None:
+            continue
+        top_cell = location.ancestor_path[0] if location.ancestor_path else cell
+        if top_cell.table_index != table_index:
+            # A later unlabelled table could be a separate continuation.
+            uncertain |= top_cell.table_index > table_index and bool(block.text.strip())
+            continue
+        if top_cell.row_index == 0:
+            continue
+        if block.text.strip():
+            populated_rows.add(top_cell.row_index)
+        if top_cell.column_index == column:
+            paragraphs = rows.setdefault(top_cell.row_index, [])
+            if block.text.strip():
+                paragraphs.append(index)
+                uncertain |= (
+                    bool(location.ancestor_path) or top_cell.column_span != 1 or len(paragraphs) > 1
+                )
+
+    descriptions = [index for paragraphs in rows.values() for index in paragraphs]
+    return descriptions, uncertain or not descriptions or bool(populated_rows - rows.keys())
+
+
+def _associate_table_descriptions(
+    item: CheckItem,
+    occurrences: Sequence[_Occurrence],
+    document: Document,
+    sections: Sequence[tuple[int, int, bool]],
+) -> tuple[list[_Occurrence], bool]:
+    located = [
+        replace(occurrence, comparison_blocker=_TABLE_LOCATOR)
+        if occurrence.match_type is not MatchType.EXPECTED_DESCRIPTION
+        and any(start <= occurrence.block_index < end for start, end, _ in sections)
+        else occurrence
+        for occurrence in occurrences
+    ]
+    uncertain = False
+    for start, end, shared in sections:
+        if shared:
+            uncertain = True
+            continue
+        indices, uncertain_section = _description_blocks(document, start + 1, end)
+        uncertain |= uncertain_section
+        for index in indices:
+            block = document.blocks[index]
+            normalized = normalize(block.text).text
+            span = (0, len(block.text))
+            located.append(
+                _Occurrence(
+                    block_index=index,
+                    item=item,
+                    term=block.text,
+                    alias_id="",
+                    match_type=MatchType.TABLE_DESCRIPTION,
+                    transformations=_active_rules(block.text),
+                    raw_match_span=span,
+                    raw_requirement_span=span,
+                    requirement_text=normalized,
+                    strike_coverage=_strike_coverage(block, span),
+                    value_tokens=_value_tokens(normalized),
+                    comparison_blocker="",
+                    ambiguous=False,
+                )
+            )
+    return located, uncertain
+
+
 # --- classification ----------------------------------------------------------
 
 
 def _classify(
-    item: CheckItem, occurrences: Sequence[_Occurrence], document: Document
+    item: CheckItem,
+    occurrences: Sequence[_Occurrence],
+    document: Document,
+    uncertain_table: bool,
 ) -> CheckResult:
     evidence = tuple(
         MatchEvidence(
@@ -398,6 +513,12 @@ def _classify(
         )
         for index, occurrence in enumerate(occurrences)
     )
+    primary = next((e for e in evidence if e.match_type is MatchType.TABLE_DESCRIPTION), None)
+    if primary is None:
+        primary = next(
+            (e for e in evidence if e.match_type is not MatchType.EXPECTED_DESCRIPTION),
+            evidence[0] if evidence else None,
+        )
 
     def result(
         resolution: Resolution,
@@ -406,6 +527,13 @@ def _classify(
         comparison_reason: str,
         review_reasons: tuple[str, ...],
     ) -> CheckResult:
+        initial = primary
+        if (
+            comparison_state is ComparisonState.DIFFERENT
+            and primary
+            and not primary.can_compare_description
+        ):
+            initial = next((e for e in evidence if e.can_compare_description), primary)
         return CheckResult(
             check_item=item,
             document_id=document.document_id,
@@ -416,7 +544,7 @@ def _classify(
             comparison_reason=comparison_reason,
             review_reasons=review_reasons,
             rule_revision=RULE_REVISION,
-            primary_evidence_id=evidence[0].evidence_id if evidence else "",
+            primary_evidence_id=initial.evidence_id if initial else "",
         )
 
     if not occurrences:
@@ -427,27 +555,33 @@ def _classify(
             "nothing-to-compare",
             (),
         )
-    identity = [o for o in occurrences if o.match_type is not MatchType.EXPECTED_DESCRIPTION]
-    if not identity:
+    qualifying = [
+        o
+        for o in occurrences
+        if o.match_type is not MatchType.EXPECTED_DESCRIPTION
+        and o.comparison_blocker != _TABLE_LOCATOR
+    ]
+    if not qualifying:
         return result(
             Resolution.UNRESOLVED,
             None,
             ComparisonState.NOT_COMPARED,
             "result-unresolved",
-            ("expected-description-only",),
+            ("uncertain-function-table" if uncertain_table else "expected-description-only",),
         )
-    clean = [o for o in identity if not o.ambiguous]
+    clean = [o for o in qualifying if not o.ambiguous]
+    reasons = ["uncertain-function-table"] if uncertain_table else []
     if not clean:
+        reasons.append("ambiguous-function-identity")
         return result(
             Resolution.UNRESOLVED,
             None,
             ComparisonState.NOT_COMPARED,
             "result-unresolved",
-            ("ambiguous-function-identity",),
+            tuple(reasons),
         )
     active = [o for o in clean if o.strike_coverage is StrikeCoverage.NONE]
     struck = [o for o in clean if o.strike_coverage is StrikeCoverage.FULL]
-    reasons: list[str] = []
     if any(o.strike_coverage is StrikeCoverage.PARTIAL for o in clean):
         reasons.append("partial-strike")
     if any(o.strike_coverage is StrikeCoverage.UNKNOWN for o in clean):
@@ -455,7 +589,11 @@ def _classify(
     if active and struck:
         reasons.append("active-and-struck-coexist")
     if active:
-        value_sets = [o.value_tokens for o in active if o.value_tokens]
+        value_sets = [
+            o.value_tokens
+            for o in active
+            if o.value_tokens and o.comparison_blocker != _OVERLAPPING_IDENTITY
+        ]
         if len(value_sets) >= 2 and any(v != value_sets[0] for v in value_sets[1:]):
             reasons.append("conflicting-key-parameters")
     if reasons:
@@ -520,6 +658,7 @@ def verify(
     """
     by_item: dict[str, list[_Occurrence]] = {item.item_id: [] for item in check_items}
     item_terms = [(item, _search_terms(item)) for item in check_items]
+    heading_owners: dict[int, set[str]] = {}
     for block_index, block in enumerate(document.blocks):
         norm = normalize(block.text)
         candidates: list[_Candidate] = []
@@ -527,10 +666,25 @@ def verify(
             if cancel_check is not None and cancel_check():
                 raise VerificationCancelled("verification cancelled at a checkpoint")
             candidates.extend(_collect_candidates(item, norm, block.text, terms))
+        if block.location.part == "body" and _GN_HEADING.match(norm.text):
+            heading_owners[block_index] = {
+                candidate.item.item_id
+                for candidate in candidates
+                if candidate.match_type is not MatchType.EXPECTED_DESCRIPTION
+            }
         for occurrence in _associate_candidates(candidates, norm, block, block_index):
             by_item[occurrence.item.item_id].append(occurrence)
+    sections: dict[str, list[tuple[int, int, bool]]] = {}
+    for start, end in pairwise([*heading_owners, len(document.blocks)]):
+        owners = heading_owners[start]
+        for item_id in owners:
+            sections.setdefault(item_id, []).append((start, end, len(owners) > 1))
+
     results: list[CheckResult] = []
     for item in check_items:
-        occurrences = sorted(by_item[item.item_id], key=lambda o: (o.block_index, o.raw_match_span))
-        results.append(_classify(item, occurrences, document))
+        occurrences, uncertain_table = _associate_table_descriptions(
+            item, by_item[item.item_id], document, sections.get(item.item_id, ())
+        )
+        occurrences.sort(key=lambda o: (o.block_index, o.raw_match_span))
+        results.append(_classify(item, occurrences, document, uncertain_table))
     return tuple(results)

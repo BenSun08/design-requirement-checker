@@ -151,6 +151,52 @@ class TestIndependentFieldMatches:
         }
         assert {evidence.matched_span for evidence in result.evidence} == {(0, 8)}
 
+    @pytest.mark.parametrize(
+        ("actual", "phrase", "name"),
+        [
+            ("票机延时退电功能2s", "票机延时退电", "退电功能"),
+            ("延时2s后关机再保持3s", "延时2s后关机", "关机"),
+        ],
+    )
+    def test_overlapping_name_is_evidence_for_the_same_occurrence(
+        self, actual: str, phrase: str, name: str
+    ) -> None:
+        item = make_item("fd-gn36", phrase, actual, name=name)
+        result = verify_one(item, make_block(0, [(actual, False)]))
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        assert {evidence.match_type for evidence in result.evidence} == {
+            MatchType.EXACT,
+            MatchType.FUNCTION_NAME,
+            MatchType.EXPECTED_DESCRIPTION,
+        }
+
+    def test_same_term_in_name_and_phrase_cannot_resolve_two_items(self) -> None:
+        first = make_item("a", "控制功能甲", name="开关控制")
+        second = make_item("b", "开关控制", name="控制功能乙")
+        document = make_document(make_block(0, [("开关控制", False)]))
+        results = verify(document, (first, second))
+
+        for result in results:
+            assert result.resolution is Resolution.UNRESOLVED
+            assert result.status is None
+            assert result.review_reasons == ("ambiguous-function-identity",)
+            assert result.evidence[0].ambiguous
+
+    def test_difference_opens_the_comparable_hit_instead_of_an_ambiguous_hit(self) -> None:
+        first = make_item("a", "甲功能", "控制2s", name="控制")
+        second = make_item("b", "控制2")
+        document = make_document(
+            make_block(0, [("控制2s", False)]), make_block(1, [("甲功能3s", False)])
+        )
+        result, _ = verify(document, (first, second))
+
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        primary = next(e for e in result.evidence if e.evidence_id == result.primary_evidence_id)
+        assert primary.raw_text == "甲功能3s"
+        assert any(e.ambiguous and e.raw_text == "控制2s" for e in result.evidence)
+
 
 class TestNormalizationAllowlist:
     def test_whitespace_runs_collapse_to_single_space(self) -> None:
@@ -643,7 +689,7 @@ class TestTruthTable:
         result = verify_one(item, *blocks)
         assert result.resolution is expected_resolution
         assert result.status is expected_status
-        assert result.rule_revision == "field-match-v2"
+        assert result.rule_revision == "structured-match-v3"
 
 
 class TestDeterminismAndOrdering:
