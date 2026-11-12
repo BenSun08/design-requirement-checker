@@ -24,11 +24,12 @@ exact evidence and deferred items.
 - Run deterministic verification: exact / normalized (conservative
   allowlist) / alias detection with full evidence retention.
 - Classify each enabled item as 已配置 (CONFIGURED), 未配置 (MISSING),
-  已划除 (STRUCK_OUT), or 待人工核查 (UNRESOLVED — ambiguous/conflicting
+  已划除 (STRUCK_OUT), or 待人工核查 (UNRESOLVED — uncertain
   evidence with status deliberately unset), with an independent
   expected-vs-actual description comparison (SAME / DIFFERENT / NOT_COMPARED).
-- Review results in a Qt workspace: summary counts, priority ordering,
-  filters, search, multi-evidence detail and reconstructed source context.
+- Review results in a Qt workspace with summary counts, priority ordering,
+  filters, search, per-location comparisons, parameter conflict reminders
+  and reconstructed source context.
 - Persist the baseline atomically as local JSON with backup recovery.
 - Honest scope: unsupported Word structures force a visible LIMITED-coverage
   notice; failures never become an all-missing report; a text match is never

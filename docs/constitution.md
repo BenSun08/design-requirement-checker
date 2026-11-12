@@ -181,8 +181,9 @@ An expected-description hit without identity evidence requires manual review.
 Strike coverage is `NONE | FULL | PARTIAL | UNKNOWN` evaluated over the
 associated requirement span. A partially struck span can provide active
 evidence when the surviving description is complete against the baseline
-and source boundaries establish the edit. Within a function table, complete
-and consistent live descriptions can coexist with fully struck rows.
+and source boundaries establish the edit. Within a function table, live
+descriptions that align with the complete baseline can coexist with fully
+struck rows.
 Preserve the raw spans, original strike coverage, surviving source spans,
 and a review reminder. Classification:
 

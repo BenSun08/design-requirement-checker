@@ -176,8 +176,8 @@ the full normalized baseline with at most changes to standalone numeric
 quantities of the same units. Separators between surviving clauses remain
 in the source. Quantity structure establishes completeness. Description
 comparison and conflict detection use the actual surviving values, including
-aligned parameter positions. Unknown formatting, incomplete edits, and
-unresolved conflicts still require manual review. The review workspace shows
+aligned parameter positions. Unknown formatting and incomplete edits still
+require manual review. The review workspace shows
 the surviving description, a partial-strike reminder for configured results,
 and the unmodified source with its strike formatting.
 

@@ -510,6 +510,17 @@ class TestGNTableVerification:
         ]
         assert candidate.block_id == "t0r1c1:table-cell:p0"
 
+    def test_uncertain_description_location_does_not_report_a_local_match(self, tmp_path) -> None:
+        result = self._verify(
+            fixtures.build_gn_grid_table(tmp_path / "gn.docx", "nested-description")
+        )
+
+        assert result.resolution is Resolution.UNRESOLVED
+        assert result.review_reasons == ("uncertain-function-table",)
+        (candidate,) = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert candidate.comparison_state is ComparisonState.NOT_COMPARED
+        assert candidate.comparison_blocker == "uncertain-function-table"
+
 
 def _sha256(path) -> str:  # type: ignore[no-untyped-def]
     return hashlib.sha256(path.read_bytes()).hexdigest()

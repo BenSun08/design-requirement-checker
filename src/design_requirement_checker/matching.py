@@ -637,6 +637,11 @@ def _associate_table_descriptions(
                 (coverage,) = coverages
             else:
                 coverage = StrikeCoverage.PARTIAL
+            blocker = ""
+            if uncertain_section:
+                blocker = "uncertain-function-table"
+            elif coverage is StrikeCoverage.PARTIAL and not heading_active:
+                blocker = "inactive-function-table-heading"
             located.append(
                 _Occurrence(
                     block_index=index,
@@ -649,9 +654,7 @@ def _associate_table_descriptions(
                     raw_requirement_span=span,
                     requirement_text=normalized,
                     strike_coverage=coverage,
-                    comparison_blocker="inactive-function-table-heading"
-                    if coverage is StrikeCoverage.PARTIAL and not heading_active
-                    else "",
+                    comparison_blocker=blocker,
                     ambiguous=False,
                     active_table_heading=heading_active,
                     additional_cell_paragraphs=additional,

@@ -11,6 +11,7 @@ import weakref
 
 import fixture_factory as fixtures
 import pytest
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QTextDocument
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QPushButton
@@ -123,6 +124,7 @@ def _evidence(
     requirement_text: str = "2门控制增加开关门延时3s功能",
     match_type: MatchType = MatchType.EXACT,
     block_id: str = "body:p0",
+    comparison_state: ComparisonState = ComparisonState.NOT_COMPARED,
 ) -> MatchEvidence:
     # Derive zero-based paragraph index from "body:pN" ids for one-based display.
     para_index = 0
@@ -147,6 +149,7 @@ def _evidence(
         match_type=match_type,
         transformations=(),
         strike_coverage=StrikeCoverage.NONE,
+        comparison_state=comparison_state,
     )
 
 
@@ -1440,7 +1443,10 @@ class TestResultDetail:
             detection_phrase="x",
             expected_description="2门控制增加开关门延时2s功能",
         )
-        ev = _evidence(requirement_text="2门控制增加开关门延时3s功能")
+        ev = _evidence(
+            requirement_text="2门控制增加开关门延时3s功能",
+            comparison_state=ComparisonState.DIFFERENT,
+        )
         result = CheckResult(
             check_item=item,
             document_id="doc-ui",
@@ -1470,7 +1476,10 @@ class TestResultDetail:
             detection_phrase="x",
             expected_description="2门控制增加开关门延时2s功能",
         )
-        ev = _evidence(requirement_text="2门控制增加开关门延时3s功能")
+        ev = _evidence(
+            requirement_text="2门控制增加开关门延时3s功能",
+            comparison_state=ComparisonState.DIFFERENT,
+        )
         result = CheckResult(
             check_item=item,
             document_id="doc-ui",
@@ -1576,6 +1585,69 @@ class TestStatusSpecificPresentation:
 
 
 class TestMultiEvidence:
+    def test_occurrence_list_shows_individual_comparisons_and_conflicting_values(
+        self, qapp, tmp_path
+    ) -> None:
+        expected = "延时2s后允许输出"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("延时3s后允许输出", False),),
+            ((expected, False),),
+            (("延时5s后允许输出", True),),
+        )
+        document = import_document(path)
+        assert isinstance(document, Document)
+        item = CheckItem(
+            item_id="gn36",
+            code="FD-GN36",
+            name="票机延时退电功能",
+            detection_phrase="票机延时",
+            expected_description=expected,
+        )
+        (result,) = verify_document(document, (item,)).results
+        window = MainWindow(check_items=(item,))
+        window.set_document(document)
+        try:
+            assert window.complete_verification(window._op_generation, (result,))
+            window._set_filter("仅异常")
+            assert window._result_list.count() == 1
+            detail = window._detail_view.toPlainText()
+            assert "已配置" in detail
+            assert "相关位置 3 处" in detail
+            assert "定位与候选 4 处" in detail
+            assert detail.index("参数不一致（2s）") < detail.index("定位与候选 4 处")
+            assert "完整匹配 1 处" in detail
+            assert "已划除 1 处" in detail
+            assert "当前所选位置 · 完整匹配" in detail
+            assert "参数不一致（2s）" in detail and "参数不一致（3s）" in detail
+            assert "差异详情" not in detail
+            assert "展开本处 2 条命中记录" in detail
+            window._on_evidence_anchor(QUrl("evidence-details:toggle"))
+            assert "预期要求匹配" in window._detail_view.toPlainText()
+
+            difference = next(
+                index
+                for index, evidence in enumerate(result.evidence)
+                if evidence.comparison_state is ComparisonState.DIFFERENT
+            )
+            window._on_evidence_anchor(QUrl(f"evidence-location:{difference}"))
+            detail = window._detail_view.toPlainText()
+            assert "当前所选位置 · 描述有差异" in detail
+            assert "实际描述：延时3s后允许输出" in detail
+            assert "差异详情" in detail
+
+            struck = next(
+                index
+                for index, evidence in enumerate(result.evidence)
+                if evidence.strike_coverage is StrikeCoverage.FULL
+            )
+            window._on_evidence_anchor(QUrl(f"evidence-location:{struck}"))
+            detail = window._detail_view.toPlainText()
+            assert "已划除条款：延时5s后允许输出" in detail
+            assert "差异详情" not in detail
+        finally:
+            window.close()
+
     def test_multiline_description_shows_all_cell_paragraphs(self, qapp, tmp_path) -> None:
         path = fixtures.build_gn_requirements(
             tmp_path / "gn.docx",
@@ -1694,8 +1766,6 @@ class TestMultiEvidence:
 
         text = window._detail_view.toPlainText()
         assert f"实际描述：{actual}" in text
-        assert "功能名称匹配" in text
-        assert "预期要求匹配" in text
         assert "功能描述表格关联" in text
         assert "差异详情" in text
 
@@ -1703,11 +1773,20 @@ class TestMultiEvidence:
         text = window._detail_view.toPlainText()
         assert "定位原文" in text
         assert "差异详情" not in text
+        window._on_evidence_anchor(QUrl("evidence-details:toggle"))
+        assert "功能名称匹配" in window._detail_view.toPlainText()
+        candidate = next(
+            index
+            for index, evidence in enumerate(result.evidence)
+            if evidence.match_type is MatchType.EXPECTED_DESCRIPTION
+        )
+        window._on_evidence_anchor(QUrl(f"evidence-location:{candidate}"))
+        assert "预期要求匹配" in window._detail_view.toPlainText()
         window.close()
 
     def test_evidence_selector_shows_all_occurrences(self, qapp) -> None:
         ev1 = _evidence(evidence_id="e1", requirement_text="第一处需求")
-        ev2 = _evidence(evidence_id="e2", requirement_text="第二处需求")
+        ev2 = _evidence(evidence_id="e2", requirement_text="第二处需求", block_id="body:p1")
         result = _result_with_evidence(
             "a",
             status=CheckStatus.CONFIGURED,
@@ -1716,8 +1795,9 @@ class TestMultiEvidence:
         window = MainWindow(check_items=(_item(),))
         window._show_detail(result)
         text = window._detail_view.toPlainText()
-        assert "证据 1" in text
-        assert "证据 2" in text
+        assert "相关位置 2 处" in text
+        assert "正文 · 段1" in text
+        assert "正文 · 段2" in text
         window.close()
 
     def test_selecting_evidence_updates_actual_text(self, qapp) -> None:
