@@ -122,13 +122,16 @@ successfully checked supported scope (UI wording: 在已检查范围内未找到
 证据; not proof of physical absence). **STRUCK_OUT** — all qualifying
 occurrences are fully struck with no active/partial/unknown qualifying
 occurrence. **UNRESOLVED (待人工核查)** — uncertain partial/unknown strike,
-unexplained active+struck coexistence, conflicting key values across active occurrences,
+unexplained active+struck coexistence,
 or ambiguous function identity; status unset, reasons shown, all evidence
 shown.
 
 A single active occurrence with `3s` against an expected `2s` is
-CONFIGURED + DIFFERENT. Conflicting active values are UNRESOLVED. Empty
-expected description → NOT_COMPARED with visible explanation. No confidence
+CONFIGURED + DIFFERENT. Any comparable active difference makes the
+overall comparison DIFFERENT. Each occurrence reports its own comparison.
+Conflicting active values add a review reminder with the affected values
+and locations. An empty expected description yields NOT_COMPARED with
+a visible explanation. No confidence
 percentages exist anywhere; a text match is not a calibrated probability.
 
 ## 6. Matching semantics
@@ -173,8 +176,8 @@ the full normalized baseline with at most changes to standalone numeric
 quantities of the same units. Separators between surviving clauses remain
 in the source. Quantity structure establishes completeness. Description
 comparison and conflict detection use the actual surviving values, including
-aligned parameter positions. Unknown formatting, incomplete edits, and
-unresolved conflicts still require manual review. The review workspace shows
+aligned parameter positions. Unknown formatting and incomplete edits still
+require manual review. The review workspace shows
 the surviving description, a partial-strike reminder for configured results,
 and the unmodified source with its strike formatting.
 
@@ -185,10 +188,19 @@ match the normalized baseline for this rule.
 
 When all qualifying evidence belongs to one function table with an active
 heading match, fully struck rows can coexist with live rows. All live
-descriptions must align with the complete baseline description and agree on
-active parameter values. This supports CONFIGURED, including description
+descriptions must align with the complete baseline description. This
+supports CONFIGURED, including description
 differences from the baseline. The review workspace selects live evidence
 and retains the struck rows with a review reminder.
+
+A complete, unambiguously associated active description that matches a
+nonblank baseline can also coexist with fully struck occurrences at other
+locations. A table description qualifies for this rule under an active
+heading. Bare identities and unassociated description hits cannot establish
+this match. Unexplained partial strike, unknown strike and uncertain table
+association still require review. Parameter conflicts require differing
+values at corresponding positions in descriptions with the same literal
+structure and units.
 
 No fuzzy or semantic matching in v0.1.
 
@@ -223,8 +235,14 @@ default window is 1440 × 900 with a 1024 × 600 minimum.
 
 - Detail shows canonical name/category/code, status, match method, expected
   vs actual text, difference (`2s → 3s` style rendering), review reasons,
-  a multi-evidence occurrence selector, and reconstructed prev/current/next
-  source context with requirement-span highlighting.
+  and reconstructed prev/current/next source context with requirement-span
+  highlighting. The occurrence list groups overlapping hits in one source
+  span and shows each whole GN description cell as one location. Each
+  location displays its strike state and comparison result. The reviewer
+  can expand the list of underlying hits and select a source position.
+  Locator hits and unassociated description candidates appear below the
+  requirement locations. The initial selection prefers a complete active
+  match when available.
 - STRUCK_OUT detail renders actual text with a strike line plus a textual
   label; MISSING detail shows the scope-limited message with no fabricated
   location; NOT_COMPARED shows the human-readable reason.

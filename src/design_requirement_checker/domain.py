@@ -14,7 +14,7 @@ Part = Literal["body", "table-cell"]
 
 #: Identifier of the deterministic rule set carried by every CheckResult.
 #: Bump it whenever the verified rule behavior changes (docs/spec.md §5).
-RULE_REVISION = "gn-description-cell-v6"
+RULE_REVISION = "multiple-occurrences-v7"
 
 #: Declared extraction scope of the current slice; COMPLETE/LIMITED coverage
 #: is relative to this scope, not to every Word feature.
@@ -282,6 +282,9 @@ class MatchEvidence:
     For a whole description cell, the span fields identify the first
     paragraph and subsequent paragraphs retain their own locations and runs.
     The comparison text and strike coverage describe the entire cell.
+    ``comparison_state`` applies to this evidence. ``conflicting_parameters``
+    contains the values at positions that differ across aligned active
+    descriptions, in source order.
     """
 
     evidence_id: str
@@ -301,6 +304,8 @@ class MatchEvidence:
     comparison_blocker: str = ""
     active_description_spans: tuple[tuple[int, int], ...] = ()
     additional_cell_paragraphs: tuple[DocumentBlock, ...] = ()
+    comparison_state: ComparisonState = ComparisonState.NOT_COMPARED
+    conflicting_parameters: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.evidence_id:

@@ -124,7 +124,8 @@ def build_gn_description_runs(
 
 
 def build_gn_grid_table(
-    path: Path, layout: Literal["leading-omission", "excluded-cell", "merged-header"]
+    path: Path,
+    layout: Literal["leading-omission", "excluded-cell", "merged-header", "nested-description"],
 ) -> Path:
     """A description column whose Word grid position can differ from cell order."""
     doc = Document()
@@ -138,6 +139,11 @@ def build_gn_grid_table(
     table.cell(1, 2).text = "应当保持为备注"
     if layout == "merged-header":
         table.cell(0, 1).merge(table.cell(0, 2)).text = "功能描述"
+    elif layout == "nested-description":
+        description = table.cell(1, 1)
+        text = description.text
+        description.text = ""
+        description.add_table(rows=1, cols=1).cell(0, 0).text = text
     else:
         row = table.rows[1]._tr
         first_cell = row.tc_lst[0]

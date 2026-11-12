@@ -94,7 +94,8 @@ _REASON_LABELS: dict[str, str] = {
     "unknown-strike-formatting": "划线格式未知",
     "active-and-struck-coexist": "生效与划线共存",
     "struck-rows-with-active-description": "同一功能表含已划除条款，已按有效描述核查",
-    "conflicting-key-parameters": "关键参数冲突",
+    "struck-with-active-description": "存在完整有效匹配，另有已划除记录",
+    "conflicting-key-parameters": "多处有效要求的关键参数不一致，请核对各处取值",
     "ambiguous-function-identity": "功能身份歧义",
     "expected-description-only": "仅命中预期要求，需确认功能归属",
     "uncertain-function-table": "无法可靠确定功能描述表格或描述范围",
@@ -172,6 +173,49 @@ def format_location(location: DocumentLocation) -> str:
     if location.part == "body":
         return f"正文 · 段{location.paragraph_index + 1}"
     return f"{_cell_path_text(location)} · 段{location.paragraph_index + 1}"
+
+
+def _evidence_location_groups(evidence: tuple[MatchEvidence, ...]) -> list[list[int]]:
+    """Group overlapping source spans and hits within a linked description cell."""
+    cell_anchors: dict[str, int] = {}
+    for index, entry in enumerate(evidence):
+        if entry.match_type is MatchType.TABLE_DESCRIPTION:
+            cell_anchors[entry.block_id] = index
+            for paragraph in entry.additional_cell_paragraphs:
+                cell_anchors[paragraph.block_id] = index
+    groups: dict[int, list[int]] = {}
+    previous_block = ""
+    group_start = 0
+    group_end = 0
+    for index, entry in enumerate(evidence):
+        anchor = cell_anchors.get(entry.block_id)
+        if anchor is None:
+            start, end = entry.requirement_span
+            if entry.block_id != previous_block or start >= group_end:
+                previous_block, group_start, group_end = entry.block_id, index, end
+            else:
+                group_end = max(group_end, end)
+            anchor = group_start
+        groups.setdefault(anchor, []).append(index)
+    return list(groups.values())
+
+
+def _occurrence_comparison(entry: MatchEvidence) -> str:
+    if entry.comparison_state is ComparisonState.SAME:
+        return "完整匹配"
+    if entry.comparison_state is ComparisonState.DIFFERENT:
+        return "描述有差异"
+    if entry.comparison_blocker == "no-associated-requirement-content":
+        return "描述不足"
+    return "未比较描述"
+
+
+_OCCURRENCE_STRIKE_LABELS = {
+    StrikeCoverage.NONE: "有效",
+    StrikeCoverage.FULL: "已划除",
+    StrikeCoverage.PARTIAL: "部分划线",
+    StrikeCoverage.UNKNOWN: "划线格式未知",
+}
 
 
 def _format_run_html(run: TextRun) -> str:
@@ -406,6 +450,7 @@ class MainWindow(QMainWindow):
         self._close_requested = False
         self._detail_result: CheckResult | None = None
         self._evidence_index: int = 0
+        self._show_evidence_hits = False
         self._update_actions()
 
     # --- shell: header, navigation, pages (prototype parity) ----------------
@@ -1100,20 +1145,22 @@ class MainWindow(QMainWindow):
             )
             left.addWidget(diff_label)
         if result.status is CheckStatus.CONFIGURED:
-            strike_reminders = [
+            reminders = [
                 label
                 for reason, label in (
                     ("partial-strike-active-description", "部分划线"),
                     ("struck-rows-with-active-description", "含已划除条款"),
+                    ("struck-with-active-description", "含已划除条款"),
+                    ("conflicting-key-parameters", "多处有效要求不一致"),
                 )
                 if reason in result.review_reasons
             ]
         else:
-            strike_reminders = []
-        if strike_reminders:
-            strike_label = QLabel(" · ".join(strike_reminders))
-            strike_label.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
-            left.addWidget(strike_label)
+            reminders = []
+        if reminders:
+            reminder_label = QLabel(" · ".join(reminders))
+            reminder_label.setStyleSheet(f"color: {style.MUTED}; font-size: 12px;")
+            left.addWidget(reminder_label)
         layout.addLayout(left, 1)
         status_text = self._status_text(result)
         status_label = QLabel(status_text)
@@ -1216,6 +1263,7 @@ class MainWindow(QMainWindow):
 
     def _show_detail(self, result: CheckResult) -> None:
         self._detail_result = result
+        self._show_evidence_hits = False
         self._evidence_index = next(
             (
                 i
@@ -1235,18 +1283,99 @@ class MainWindow(QMainWindow):
 
     def _on_evidence_anchor(self, url: QUrl) -> None:
         scheme, _, value = url.toString().partition(":")
-        if scheme == "evidence" and value.isdigit():
+        if scheme == "evidence-details" and value == "toggle":
+            scrollbar = self._detail_view.verticalScrollBar()
+            position = scrollbar.value()
+            self._show_evidence_hits = not self._show_evidence_hits
+            self._render_detail()
+            scrollbar.setValue(position)
+        elif scheme in ("evidence", "evidence-location") and value.isdigit():
+            if scheme == "evidence-location":
+                self._show_evidence_hits = False
             self._select_evidence(int(value))
+
+    def _evidence_locations_html(self, evidence: tuple[MatchEvidence, ...]) -> str:
+        groups = _evidence_location_groups(evidence)
+        representatives = [
+            max(
+                group,
+                key=lambda i: (
+                    evidence[i].match_type is MatchType.TABLE_DESCRIPTION,
+                    evidence[i].comparison_state is ComparisonState.SAME,
+                    evidence[i].comparison_state is ComparisonState.DIFFERENT,
+                    evidence[i].match_type is not MatchType.EXPECTED_DESCRIPTION,
+                ),
+            )
+            for group in groups
+        ]
+        locations: list[tuple[list[int], int]] = []
+        locator_hits: list[tuple[list[int], int]] = []
+        for group, index in zip(groups, representatives, strict=True):
+            entry = evidence[index]
+            if (
+                entry.match_type is MatchType.EXPECTED_DESCRIPTION
+                or entry.comparison_blocker == "function-table-locator"
+            ):
+                locator_hits.append((group, index))
+            else:
+                locations.append((group, index))
+        entries = [evidence[i] for _, i in locations]
+        totals = (
+            ("完整匹配", sum(e.comparison_state is ComparisonState.SAME for e in entries)),
+            ("描述有差异", sum(e.comparison_state is ComparisonState.DIFFERENT for e in entries)),
+            ("已划除", sum(e.strike_coverage is StrikeCoverage.FULL for e in entries)),
+        )
+        summary = [f"相关位置 {len(locations)} 处"]
+        summary.extend(f"{label} {count} 处" for label, count in totals if count)
+        rows = ["<tr><th>位置</th><th>原文状态</th><th>本处比较</th></tr>"]
+        for row_index, (group, index) in enumerate(locations + locator_hits):
+            if row_index == len(locations):
+                rows.append(f'<tr><th colspan="3">定位与候选 {len(locator_hits)} 处</th></tr>')
+            entry = evidence[index]
+            location = html.escape(format_location(entry.location))
+            strike = _OCCURRENCE_STRIKE_LABELS[entry.strike_coverage]
+            if entry.strike_coverage is StrikeCoverage.NONE:
+                if entry.ambiguous or entry.match_type is MatchType.EXPECTED_DESCRIPTION:
+                    strike = "待确认归属"
+                elif entry.comparison_blocker == "function-table-locator":
+                    strike = "仅用于定位"
+            comparison = _occurrence_comparison(entry)
+            if entry.conflicting_parameters:
+                values = html.escape("、".join(entry.conflicting_parameters))
+                comparison += f"<br>参数不一致（{values}）"
+            current = self._evidence_index in group
+            row_style = f' bgcolor="{style.CONTEXT_CURRENT}"' if current else ""
+            rows.append(
+                f"<tr{row_style}>"
+                f'<td><a href="evidence-location:{index}">{location}</a></td>'
+                f"<td>{strike}</td><td>{comparison}</td></tr>"
+            )
+            if current and len(group) > 1:
+                toggle = (
+                    "收起本处命中记录"
+                    if self._show_evidence_hits
+                    else f"展开本处 {len(group)} 条命中记录"
+                )
+                hit_details = f'<a href="evidence-details:toggle">{toggle}</a>'
+                if self._show_evidence_hits:
+                    links = " · ".join(
+                        f'<a href="evidence:{i}">{_MATCH_TYPE_LABELS[evidence[i].match_type]}</a>'
+                        for i in group
+                    )
+                    hit_details += f"<br>{links}"
+                rows.append(f'<tr><td colspan="3">{hit_details}</td></tr>')
+        return (
+            f"<p>{' · '.join(summary)}</p>"
+            '<table width="100%" cellspacing="0" cellpadding="5" border="1">'
+            + "".join(rows)
+            + "</table>"
+        )
 
     def _render_detail(self) -> None:
         """Render the selected result as the prototype .detail-pane.
 
-        Structure: detail-title (name/code/category + status), metadata line
-        (匹配方式 / 证据数 / 描述比较), the two-column .comparison block
-        (预期要求 vs 实际内容), an amber diff banner for 描述有差异, the
-        comparison/review reason lines, the .evidence section and the
-        .context prev/current/next block. Every displayed value still comes
-        from the domain result — this method only changes presentation.
+        Show the overall result, the selected source comparison, the
+        occurrence list and the original source context.
         """
         result = self._detail_result
         if result is None:
@@ -1259,12 +1388,13 @@ class MainWindow(QMainWindow):
         selected_raw = selected.description_source_text if selected is not None else ""
         source_html = _multiline_html(selected_raw)
         actual_text = selected.requirement_text if selected is not None else ""
-        if selected is not None and selected.match_type is MatchType.TABLE_DESCRIPTION:
+        if selected is not None and (
+            selected.match_type is MatchType.TABLE_DESCRIPTION
+            or selected.comparison_state is ComparisonState.SAME
+        ):
             actual_text = selected_raw
         show_difference = (
-            result.comparison_state is ComparisonState.DIFFERENT
-            and selected is not None
-            and selected.can_compare_description
+            selected is not None and selected.comparison_state is ComparisonState.DIFFERENT
         )
         match_method = (
             _MATCH_TYPE_LABELS.get(selected.match_type, "") if selected is not None else ""
@@ -1288,15 +1418,11 @@ class MainWindow(QMainWindow):
             "</td></tr></table>"
         ]
 
-        # .metadata — one muted line; only the pieces that apply to this
-        # result (a MISSING result shows neither 匹配方式 nor 证据数).
-        meta: list[str] = []
-        if match_method:
-            meta.append(f"匹配方式 <b>{match_method}</b>")
-        if evidence:
-            meta.append(f"证据 <b>{len(evidence)} 处</b>")
-        meta.append(f"描述比较 <b>{comparison_text}</b>")
-        parts.append(f'<p style="color: {style.MUTED}; font-size: 12px">{" · ".join(meta)}</p>')
+        parts.append(f'<p style="color: {style.MUTED}">总体描述比较 · <b>{comparison_text}</b></p>')
+        if selected is not None:
+            parts.append(
+                f"<p>当前所选位置 · <b>{_occurrence_comparison(selected)}</b> · {match_method}</p>"
+            )
 
         # .comparison — expected vs actual side by side.
         expected_cell = (
@@ -1312,7 +1438,7 @@ class MainWindow(QMainWindow):
         elif selected is not None and selected.match_type is MatchType.EXPECTED_DESCRIPTION:
             actual_body = f"<p>候选原文：{source_html}</p>"
         elif (
-            result.status is CheckStatus.CONFIGURED
+            result.status is not CheckStatus.STRUCK_OUT
             and selected is not None
             and selected.strike_coverage is StrikeCoverage.FULL
         ):
@@ -1362,7 +1488,7 @@ class MainWindow(QMainWindow):
             label = "核查原因" if result.resolution is Resolution.UNRESOLVED else "核查提醒"
             parts.append(f"<p>{label}：</p><ul>{reasons}</ul>")
 
-        # .evidence — occurrence links, position, and the review caveat.
+        # .evidence — source locations with independently evaluated comparisons.
         parts.append("<p><b>匹配证据</b></p>")
         if result.status is CheckStatus.MISSING:
             parts.append(
@@ -1370,13 +1496,7 @@ class MainWindow(QMainWindow):
                 f'<p style="color: {style.MUTED}">没有匹配证据，因此不显示虚构的原文位置。</p>'
             )
         elif evidence:
-            if len(evidence) > 1:
-                links = " ".join(
-                    f'<a href="evidence:{i}">证据 {i + 1} · '
-                    f"{_MATCH_TYPE_LABELS[entry.match_type]}</a>"
-                    for i, entry in enumerate(evidence)
-                )
-                parts.append(f"<p>{links}</p>")
+            parts.append(self._evidence_locations_html(evidence))
             if selected is not None:
                 parts.append(f"<p>位置：{html.escape(format_location(selected.location))}</p>")
             parts.append(

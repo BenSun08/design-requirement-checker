@@ -117,6 +117,9 @@ not start them without explicit owner authorization.
   descriptions alongside fully struck rows (merged in PR #23).
 - [x] Compare all paragraphs of each linked GN description cell and display
   the complete multiline description with its source locations.
+- [x] Report multiple occurrences with individual comparisons. Preserve
+  CONFIGURED for differing active descriptions and flag aligned parameter
+  conflicts. Verify cross-location strike coexistence and the review pane.
 
 ## V0.2 backlog (CANDIDATE — unscheduled, not committed)
 
