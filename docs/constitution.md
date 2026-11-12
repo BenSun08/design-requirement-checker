@@ -187,15 +187,20 @@ Preserve the raw spans, original strike coverage, surviving source spans,
 and a review reminder. Classification:
 
 ```text
-consistent active evidence            → RESOLVED / CONFIGURED
+qualifying active evidence            → RESOLVED / CONFIGURED
 all qualifying evidence fully struck  → RESOLVED / STRUCK_OUT
 no qualifying evidence                → RESOLVED / MISSING
 partial strike with unproven active text / unknown strike /
 unexplained active+struck coexistence /
-conflicting active key values / ambiguous function identity /
+ambiguous function identity /
 description-only hit / uncertain function table
                                       → UNRESOLVED / status=None
 ```
+
+Differences between active descriptions, including conflicts between aligned
+parameter values, retain CONFIGURED and surface the affected evidence.
+A complete active match can coexist with fully struck evidence across
+document locations. The evidence for each location remains inspectable.
 
 No fuzzy matching and no semantic matching in v0.1.
 

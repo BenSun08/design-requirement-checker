@@ -230,7 +230,8 @@ class TestGNTableVerification:
         )
         result = self._verify(path)
 
-        assert result.status is None
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
         assert "conflicting-key-parameters" in result.review_reasons
 
     def test_swapped_parameter_values_in_active_clauses_are_a_conflict(self, tmp_path) -> None:
@@ -242,9 +243,13 @@ class TestGNTableVerification:
         )
         result = self._verify(path, expected)
 
-        assert result.status is None
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.review_reasons == ("conflicting-key-parameters",)
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        assert result.resolution is Resolution.RESOLVED
+        assert "conflicting-key-parameters" in result.review_reasons
+        first, second = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert first.conflicting_parameters == ("30min", "15min")
+        assert second.conflicting_parameters == ("15min", "30min")
 
     def test_partial_description_cannot_restore_a_struck_heading_identity(self, tmp_path) -> None:
         path = fixtures.build_gn_description_runs(
@@ -304,13 +309,12 @@ class TestGNTableVerification:
         )
         result = self._verify(path)
 
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.status is None
+        assert result.resolution is Resolution.RESOLVED
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
         assert "conflicting-key-parameters" in result.review_reasons
 
-    def test_struck_row_exception_requires_all_live_rows_in_the_table_to_align(
-        self, tmp_path
-    ) -> None:
+    def test_complete_match_with_struck_and_different_live_rows(self, tmp_path) -> None:
         path = fixtures.build_gn_requirements(
             tmp_path / "gn.docx",
             (
@@ -321,10 +325,13 @@ class TestGNTableVerification:
         )
         result = self._verify(path)
 
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.review_reasons == ("active-and-struck-coexist",)
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        assert result.review_reasons == ("struck-with-active-description",)
 
-    def test_struck_row_exception_does_not_override_another_function_table(self, tmp_path) -> None:
+    def test_complete_match_with_struck_and_different_live_rows_across_tables(
+        self, tmp_path
+    ) -> None:
         expected = "延时30min后允许输出"
         path = fixtures.build_gn_description_runs(
             tmp_path / "gn.docx",
@@ -334,8 +341,42 @@ class TestGNTableVerification:
         )
         result = self._verify(path, expected)
 
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.review_reasons == ("active-and-struck-coexist",)
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        assert result.review_reasons == ("struck-with-active-description",)
+
+    def test_complete_active_cell_and_fully_struck_cell_in_different_tables(self, tmp_path) -> None:
+        expected = "延时30min后允许输出"
+        path = fixtures.build_gn_description_runs(
+            tmp_path / "gn.docx",
+            (("延时15min后允许输出", True),),
+            next_section_rows=(((expected, False),),),
+        )
+        result = self._verify(path, expected)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.SAME
+        assert result.review_reasons == ("struck-with-active-description",)
+        struck, active = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert struck.strike_coverage is StrikeCoverage.FULL
+        assert struck.comparison_state is ComparisonState.NOT_COMPARED
+        assert active.comparison_state is ComparisonState.SAME
+        assert result.primary_evidence_id == active.evidence_id
+
+    def test_different_conditions_do_not_create_a_parameter_conflict(self, tmp_path) -> None:
+        expected = "点火后延时2s"
+        path = fixtures.build_gn_requirements(
+            tmp_path / "gn.docx", (("休眠后延时3s", False), (expected, False))
+        )
+        result = self._verify(path, expected)
+
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
+        assert "conflicting-key-parameters" not in result.review_reasons
+        other, same = [e for e in result.evidence if e.match_type is MatchType.TABLE_DESCRIPTION]
+        assert other.comparison_state is ComparisonState.DIFFERENT
+        assert same.comparison_state is ComparisonState.SAME
+        assert result.primary_evidence_id == same.evidence_id
 
     def test_struck_row_exception_requires_a_live_heading_identity(self, tmp_path) -> None:
         expected = "延时30min后允许输出"

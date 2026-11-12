@@ -187,7 +187,6 @@ class _Occurrence:
     raw_requirement_span: tuple[int, int]
     requirement_text: str
     strike_coverage: StrikeCoverage
-    value_tokens: frozenset[str]
     comparison_blocker: str
     ambiguous: bool
     active_table_heading: bool = False
@@ -521,7 +520,6 @@ def _associate_candidates(
                 raw_requirement_span=raw_requirement_span,
                 requirement_text=requirement_text,
                 strike_coverage=_strike_coverage(block, raw_requirement_span),
-                value_tokens=_value_tokens(requirement_text),
                 comparison_blocker=blocker,
                 ambiguous=(candidate.item.item_id, raw_span) in ambiguous,
             )
@@ -651,7 +649,6 @@ def _associate_table_descriptions(
                     raw_requirement_span=span,
                     requirement_text=normalized,
                     strike_coverage=coverage,
-                    value_tokens=_value_tokens(normalized),
                     comparison_blocker="inactive-function-table-heading"
                     if coverage is StrikeCoverage.PARTIAL and not heading_active
                     else "",
@@ -666,27 +663,39 @@ def _associate_table_descriptions(
 # --- classification ----------------------------------------------------------
 
 
-def _conflicting_active_values(active: Sequence[_Occurrence], baseline: str | None) -> bool:
-    value_sets = {
-        o.value_tokens
-        for o in active
-        if o.value_tokens and o.comparison_blocker != _OVERLAPPING_IDENTITY
-    }
-    if len(value_sets) > 1:
-        return True
-    if baseline is None:
-        return False
+def _compare_evidence(
+    evidence: tuple[MatchEvidence, ...], expected: str
+) -> tuple[MatchEvidence, ...]:
+    """Compare active descriptions and identify differing aligned parameters."""
+    compared = list(evidence)
+    aligned: dict[tuple[str, ...], list[tuple[int, tuple[str, ...]]]] = {}
+    has_baseline = bool(expected.strip(_STRIKE_WHITESPACE))
+    for index, entry in enumerate(evidence):
+        if not entry.can_compare_description:
+            continue
+        text = entry.requirement_text
+        if entry.active_description_spans:
+            text = normalize(entry.description_source_text).text
+        if has_baseline:
+            comparison = ComparisonState.SAME if text == expected else ComparisonState.DIFFERENT
+            compared[index] = replace(entry, comparison_state=comparison)
+        structure, values = _description_signature(text)
+        if values:
+            aligned.setdefault(structure, []).append((index, values))
 
-    # Projected descriptions already align to the baseline, so each
-    # corresponding parameter can be compared in its original position.
-    expected_structure, _ = _description_signature(baseline)
-    aligned_values: set[tuple[str, ...]] = set()
-    for occurrence in active:
-        if not occurrence.comparison_blocker:
-            structure, values = _description_signature(occurrence.requirement_text)
-            if structure == expected_structure:
-                aligned_values.add(values)
-    return len(aligned_values) > 1
+    for structure, entries in aligned.items():
+        if len(entries) < 2:
+            continue
+        differing = [
+            position
+            for position, values in enumerate(zip(*(values for _, values in entries), strict=True))
+            if len(set(values)) > 1
+        ]
+        if differing:
+            for index, values in entries:
+                parameters = tuple(values[i] + structure[2 * i + 1] for i in differing)
+                compared[index] = replace(compared[index], conflicting_parameters=parameters)
+    return tuple(compared)
 
 
 def _struck_rows_have_active_descriptions(
@@ -752,7 +761,11 @@ def _classify(
         )
         for index, occurrence in enumerate(occurrences)
     )
-    primary = next((e for e in evidence if e.match_type is MatchType.TABLE_DESCRIPTION), None)
+    evidence = _compare_evidence(evidence, expected_norm)
+    exact_match = next((e for e in evidence if e.comparison_state is ComparisonState.SAME), None)
+    primary = exact_match or next(
+        (e for e in evidence if e.match_type is MatchType.TABLE_DESCRIPTION), None
+    )
     if primary is None:
         primary = next(
             (e for e in evidence if e.match_type is not MatchType.EXPECTED_DESCRIPTION),
@@ -828,7 +841,7 @@ def _classify(
     for o, e in clean:
         if e.active_description_spans:
             text = normalize(e.description_source_text).text
-            active.append(replace(o, requirement_text=text, value_tokens=_value_tokens(text)))
+            active.append(replace(o, requirement_text=text))
             projected = True
     reminders = ("partial-strike-active-description",) if projected else ()
     struck_rows_explained = False
@@ -838,11 +851,16 @@ def _classify(
         )
         if struck_rows_explained:
             reminders = (*reminders, "struck-rows-with-active-description")
+        elif not _is_bare_identity(item, expected_norm) and any(
+            e.comparison_state is ComparisonState.SAME
+            and (o.match_type is not MatchType.TABLE_DESCRIPTION or o.active_table_heading)
+            for o, e in clean
+        ):
+            reminders = (*reminders, "struck-with-active-description")
         else:
             reasons.append("active-and-struck-coexist")
-    conflict_baseline = expected_norm if projected or struck_rows_explained else None
-    if _conflicting_active_values(active, conflict_baseline):
-        reasons.append("conflicting-key-parameters")
+    if any(e.conflicting_parameters for e in evidence):
+        reminders = (*reminders, "conflicting-key-parameters")
     if reasons:
         return result(
             Resolution.UNRESOLVED,
@@ -861,16 +879,16 @@ def _classify(
         )
 
     # Status CONFIGURED (active evidence exists); comparison is independent.
-    if not item.expected_description:
+    if not expected_norm.strip(_STRIKE_WHITESPACE):
         return result(
             Resolution.RESOLVED,
             CheckStatus.CONFIGURED,
             ComparisonState.NOT_COMPARED,
             "expected-description-empty",
-            (),
+            reminders,
         )
-    comparable = [o for o in active if not o.comparison_blocker]
-    if not comparable:
+    comparisons = {e.comparison_state for _, e in clean} - {ComparisonState.NOT_COMPARED}
+    if not comparisons:
         return result(
             Resolution.RESOLVED,
             CheckStatus.CONFIGURED,
@@ -878,13 +896,12 @@ def _classify(
             active[0].comparison_blocker or "mixed-comparison-occurrences",
             reminders,
         )
-    matched = [o.requirement_text == expected_norm for o in comparable]
-    if all(matched):
-        state, reason = ComparisonState.SAME, ""
-    elif not any(matched):
-        state, reason = ComparisonState.DIFFERENT, ""
-    else:
-        state, reason = ComparisonState.NOT_COMPARED, "mixed-comparison-occurrences"
+    state = (
+        ComparisonState.DIFFERENT
+        if ComparisonState.DIFFERENT in comparisons
+        else ComparisonState.SAME
+    )
+    reason = "mixed-comparison-occurrences" if len(comparisons) > 1 else ""
     return result(Resolution.RESOLVED, CheckStatus.CONFIGURED, state, reason, reminders)
 
 

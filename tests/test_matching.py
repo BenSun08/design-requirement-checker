@@ -527,13 +527,14 @@ class TestRepeatedAndConflictingEvidence:
             ("body:p1", MatchType.EXPECTED_DESCRIPTION),
         ]
 
-    def test_conflicting_active_values_are_unresolved(self) -> None:
+    def test_conflicting_active_values_are_configured_with_a_reminder(self) -> None:
         item = make_item("dr-006", PHRASE, EXPECTED)
         b0 = make_block(0, [("2门控制增加开关门延时2s功能", False)])
         b1 = make_block(1, [("2门控制增加开关门延时3s功能", False)])
         result = verify_one(item, b0, b1)
-        assert result.resolution is Resolution.UNRESOLVED
-        assert result.status is None
+        assert result.resolution is Resolution.RESOLVED
+        assert result.status is CheckStatus.CONFIGURED
+        assert result.comparison_state is ComparisonState.DIFFERENT
         assert "conflicting-key-parameters" in result.review_reasons
         assert [e.block_id for e in result.evidence if e.match_type is MatchType.EXACT] == [
             "body:p0",
@@ -550,13 +551,13 @@ class TestRepeatedAndConflictingEvidence:
         assert result.evidence[0].comparison_blocker == "no-associated-requirement-content"
         assert result.evidence[1].comparison_blocker == ""
 
-    def test_same_values_but_different_texts_is_mixed(self) -> None:
+    def test_same_values_but_different_texts_reports_difference(self) -> None:
         item = make_item("dr-006", PHRASE, "2门控制增加开关门延时2s功能")
         b0 = make_block(0, [("2门控制增加开关门延时2s功能", False)])
         b1 = make_block(1, [("2门控制增加开关门延时2s功能（可选）。", False)])
         result = verify_one(item, b0, b1)
         assert result.status is CheckStatus.CONFIGURED
-        assert result.comparison_state is ComparisonState.NOT_COMPARED
+        assert result.comparison_state is ComparisonState.DIFFERENT
         assert result.comparison_reason == "mixed-comparison-occurrences"
 
 
@@ -674,8 +675,8 @@ class TestTruthTable:
                     make_block(0, [("2门控制增加开关门延时2s功能", False)]),
                     make_block(1, [("2门控制增加开关门延时3s功能", False)]),
                 ],
-                Resolution.UNRESOLVED,
-                None,
+                Resolution.RESOLVED,
+                CheckStatus.CONFIGURED,
             ),
         ],
     )
@@ -689,7 +690,7 @@ class TestTruthTable:
         result = verify_one(item, *blocks)
         assert result.resolution is expected_resolution
         assert result.status is expected_status
-        assert result.rule_revision == "gn-description-cell-v6"
+        assert result.rule_revision == "multiple-occurrences-v7"
 
 
 class TestDeterminismAndOrdering:

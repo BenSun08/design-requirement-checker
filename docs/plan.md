@@ -262,6 +262,12 @@ Rule revision `gn-description-cell-v6` compares each linked GN description
 cell as one unit while retaining the original blocks. The review pane uses
 those source blocks for paragraph locations and formatting.
 
+Rule revision `multiple-occurrences-v7` evaluates comparison and aligned
+parameter conflicts in the matching engine and exposes each source
+location to the Qt review pane. Verify status aggregation with synthetic
+DOCX and matching tests, then verify location selection and the exception
+filter with Qt tests.
+
 Rule revision `active-description-v5` merged in PR #23. It covers
 exact inline replacements and complete, consistent live descriptions
 alongside fully struck rows in one function table. Synthetic DOCX and Qt
